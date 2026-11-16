@@ -1,0 +1,9 @@
+port_ops.db
+*.xls
+*.xlsx
+*.csv
+.env
+.venv/
+__pycache__/
+.streamlit/secrets.toml
+.DS_Store
