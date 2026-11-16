@@ -51,8 +51,43 @@ with st.sidebar:
     page = st.radio("业务模块", ["运营总览", "货柜查询", "LFD预警", "拖车商分析", "数据管理"])
     st.caption("供应商仅使用“港后拖车行”字段，不混用港前拖车商。")
 
+# Allow first-time cloud imports before attempting to read the database.
+if page == "数据管理":
+    st.subheader("业务数据管理")
+    st.caption("上传文件仅保存在当前 Streamlit 实例中；免费云端本地数据库不保证持久保存。")
+    if not os.path.exists(DB):
+        st.info("尚未导入业务数据。请先上传源文件。")
+    else:
+        with sqlite3.connect(DB) as conn:
+            st.metric("当前数据库记录数", conn.execute("SELECT COUNT(*) FROM containers").fetchone()[0])
+    admin_password = st.secrets.get("ADMIN_PASSWORD", "")
+    if not admin_password:
+        st.error("为防止公开网页被任意人员上传或覆盖业务数据，请先在 Streamlit App settings → Secrets 配置 ADMIN_PASSWORD。")
+        st.code('ADMIN_PASSWORD = "请设置一个强密码"', language="toml")
+        st.stop()
+    supplied_password = st.text_input("数据管理员密码", type="password")
+    if supplied_password != admin_password:
+        st.info("输入管理员密码后可上传文件。")
+        st.stop()
+    uploaded = st.file_uploader("上传 HTML 表格导出格式的 .xls / .html 文件", type=["xls", "html", "htm"])
+    if uploaded is not None and st.button("确认导入并替换当前数据库", type="primary"):
+        with tempfile.NamedTemporaryFile(suffix=".xls", delete=False) as tmp:
+            tmp.write(uploaded.getbuffer())
+            path = tmp.name
+        try:
+            with st.spinner("正在导入并校验数据..."):
+                load(path)
+                read_db.clear()
+            st.success("导入成功，报表已可使用。请在左侧切换到运营总览。")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"导入失败，原有数据库未被替换：{exc}")
+        finally:
+            os.unlink(path)
+    st.stop()
+
 if not os.path.exists(DB):
-    st.error("尚无本地业务数据库。请在终端执行 python import_data.py 原始文件.xls")
+    st.warning("云端尚无业务数据库。请从左侧选择「数据管理」上传原始文件。")
     st.stop()
 
 df = read_db(os.path.getmtime(DB))
