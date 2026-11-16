@@ -6,6 +6,7 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 from import_data import DB, load
+from container_detail import show_container_detail
 
 st.set_page_config(page_title="司顺国际物流港后运营工作台", page_icon="🚢", layout="wide")
 st.markdown("""<style>
@@ -48,7 +49,7 @@ def grid(data, key="default"):
                        key=f"download_csv_{key}")
 
 with st.sidebar:
-    page = st.radio("业务模块", ["运营总览", "货柜查询", "LFD预警", "拖车商分析", "数据管理"])
+    page = st.radio("业务模块", ["运营总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "数据管理"])
     st.caption("供应商仅使用“港后拖车行”字段，不混用港前拖车商。")
 
 # Allow first-time cloud imports before attempting to read the database.
@@ -154,6 +155,8 @@ if page == "运营总览":
             focused = z[z["风险"].isin(choices)].sort_values("LFD_dt", na_position="last")
             st.caption(f"匹配 {len(focused):,} 条；缺少提柜记录不等于确认未提柜。")
             grid(focused.head(1000), key=f"overview_{i}")
+elif page == "货柜详情":
+    show_container_detail(q)
 elif page == "货柜查询":
     term = st.text_input("搜索柜号 / 提单号 / 船名 / 排柜单号")
     if term:
