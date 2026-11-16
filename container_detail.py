@@ -35,7 +35,7 @@ def show_container_detail(data):
     options = list(range(len(matched)))
     chosen = c.selectbox("选择货柜", options, index=position,
         format_func=lambda i: f"{i+1}. {matched.iloc[i].get('柜号显示','') or matched.iloc[i].get('排柜单号','')}",
-        key="detail_select")
+        key=f"detail_select_{search}_{position}")
     if chosen != position:
         st.session_state.detail_position = chosen
         st.rerun()
