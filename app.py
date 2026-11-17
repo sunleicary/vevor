@@ -145,13 +145,47 @@ if page == "运营总览":
             picked = z["进口实际提箱时间_dt"].notna()
             delivered = z["实际送仓时间_dt"].notna()
             returned = z["实际还柜日期_dt"].notna()
-            stats = [("货柜记录", len(z)), ("已到港", arrived.sum()),
-                     ("LFD已过待核实", z["风险"].eq("LFD已过/提箱待核实").sum()),
-                     ("已提柜", picked.sum()), ("已送仓", delivered.sum()),
-                     ("已还空", returned.sum()), ("LFD三天内", z["风险"].eq("LFD 3天内").sum()),
-                     ("到港未记录提柜", (arrived & ~picked).sum())]
-            for col, (label, value) in zip(st.columns(8), stats):
-                col.metric(label, f"{value:,}")
+            metric_masks = [
+                ("货柜记录", pd.Series(True, index=z.index)),
+                ("已到港", arrived),
+                ("LFD已过待核实", z["风险"].eq("LFD已过/提箱待核实")),
+                ("已提柜", picked),
+                ("已送仓", delivered),
+                ("已还空", returned),
+                ("LFD三天内", z["风险"].eq("LFD 3天内")),
+                ("到港未记录提柜", arrived & ~picked),
+            ]
+            st.caption("点击下方柜量卡片，可展开对应的货柜明细。")
+            selected_metric_key = f"overview_selected_metric_{i}"
+            for row_start in (0, 4):
+                metric_cols = st.columns(4, gap="small")
+                for offset, col in enumerate(metric_cols):
+                    metric_idx = row_start + offset
+                    label, mask = metric_masks[metric_idx]
+                    count = int(mask.sum())
+                    with col:
+                        with st.container(border=True):
+                            st.caption(label)
+                            st.markdown(f"### {count:,} 柜")
+                            if st.button("查看货柜明细", key=f"overview_metric_{i}_{metric_idx}",
+                                         use_container_width=True, disabled=count == 0):
+                                if st.session_state.get(selected_metric_key) == metric_idx:
+                                    st.session_state[selected_metric_key] = None
+                                else:
+                                    st.session_state[selected_metric_key] = metric_idx
+            selected_metric = st.session_state.get(selected_metric_key)
+            if selected_metric is not None and 0 <= selected_metric < len(metric_masks):
+                detail_label, detail_mask = metric_masks[selected_metric]
+                detail_rows = z.loc[detail_mask].copy()
+                with st.container(border=True):
+                    header_col, close_col = st.columns([5, 1])
+                    header_col.markdown(f"#### 📋 {detail_label} · {len(detail_rows):,} 柜")
+                    if close_col.button("收起明细", key=f"overview_metric_close_{i}"):
+                        st.session_state[selected_metric_key] = None
+                        st.rerun()
+                    st.caption("明细受当前区域、拖车商及 ETA 范围筛选影响；缺少提柜记录不代表确认未提柜。")
+                    grid(detail_rows, key=f"metric_detail_{i}_{selected_metric}")
+
             st.markdown("### 📊 区域业务与拖车商分配")
             chart_left, chart_right = st.columns([1, 1], gap="large")
             with chart_left:
