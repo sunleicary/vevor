@@ -104,18 +104,35 @@ def show_supplier_overview(df, grid):
                         share=pd.concat([share.iloc[:6],pd.Series({"其他供应商":int(share.iloc[6:].sum())})])
                     pie_data=pd.DataFrame({"供应商":share.index,"柜量":share.values})
                     pie_data["占比"]=pie_data["柜量"].div(n).mul(100).round(1)
+                    pie_data["图上标签"]=pie_data.apply(
+                        lambda row: f'{int(row["柜量"]):,}柜 / {row["占比"]:.1f}%', axis=1)
                     pie_spec={
                         "data":{"values":pie_data.to_dict("records")},
-                        "mark":{"type":"arc","outerRadius":105,"innerRadius":46},
-                        "encoding":{
-                            "theta":{"field":"柜量","type":"quantitative","stack":True},
-                            "color":{"field":"供应商","type":"nominal",
-                                     "scale":{"range":PALETTE},
-                                     "legend":{"orient":"bottom","columns":2,"labelLimit":145}},
-                            "tooltip":[{"field":"供应商","type":"nominal"},
-                                       {"field":"柜量","type":"quantitative","format":","},
-                                       {"field":"占比","type":"quantitative","format":".1f","title":"占比 (%)"}]
-                        },
+                        "width":"container",
+                        "height":310,
+                        "layer":[
+                            {
+                                "mark":{"type":"arc","outerRadius":100,"innerRadius":43},
+                                "encoding":{
+                                    "theta":{"field":"柜量","type":"quantitative","stack":True},
+                                    "color":{"field":"供应商","type":"nominal",
+                                             "scale":{"range":PALETTE},
+                                             "legend":{"orient":"bottom","columns":2,"labelLimit":145}},
+                                    "tooltip":[{"field":"供应商","type":"nominal"},
+                                               {"field":"柜量","type":"quantitative","format":","},
+                                               {"field":"占比","type":"quantitative","format":".1f","title":"占比 (%)"}]
+                                }
+                            },
+                            {
+                                "mark":{"type":"text","radius":124,"fontSize":11,"fontWeight":"bold",
+                                        "color":"#092550"},
+                                "encoding":{
+                                    "theta":{"field":"柜量","type":"quantitative","stack":True},
+                                    "text":{"field":"图上标签","type":"nominal"},
+                                    "order":{"field":"供应商","type":"nominal"}
+                                }
+                            }
+                        ],
                         "view":{"stroke":None}
                     }
                     st.vega_lite_chart(pie_spec,use_container_width=True,key=f"supplier_pie_{REGION_SHORT[r]}")
