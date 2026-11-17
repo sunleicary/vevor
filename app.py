@@ -42,6 +42,16 @@ def grid(data, key="default"):
     columns = ["柜号显示", "区域", "目的仓", "船公司", "实际船名", "实际航次",
                "ETA日期", "ATA日期", "港后拖车行", "LFD", "进口实际提箱时间",
                "实际送仓时间", "实际还柜日期", "风险"]
+    # Some pages pass raw database rows without the derived display column.
+    # Build it locally so every report can reuse this detail table safely.
+    data = data.copy()
+    if "柜号显示" not in data.columns:
+        container_no = data["箱号"] if "箱号" in data.columns else pd.Series("", index=data.index)
+        order_no = data["排柜单号"] if "排柜单号" in data.columns else pd.Series("", index=data.index)
+        data["柜号显示"] = container_no.replace("", pd.NA).fillna(order_no)
+    for field in columns:
+        if field not in data.columns:
+            data[field] = ""
     visible = data[columns].rename(columns={"柜号显示": "箱号/排柜单号"})
     st.dataframe(visible, hide_index=True, use_container_width=True, height=450)
     st.download_button("导出当前结果 CSV",
