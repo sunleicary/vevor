@@ -154,8 +154,25 @@ if page == "运营总览":
                 col.metric(label, f"{value:,}")
             left, right = st.columns(2)
             with left:
-                st.subheader("各区域业务量")
-                st.bar_chart(z["区域"].value_counts(), horizontal=True)
+                st.subheader("各区域港后拖车商占比")
+                st.caption("按港后拖车行字段统计；分母为当前筛选条件下该区域全部货柜（含未分配拖车商）。")
+                share_data = z[["区域", "港后拖车行"]].copy()
+                share_data["港后拖车行"] = share_data["港后拖车行"].fillna("").astype(str).str.strip()
+                share_data.loc[share_data["港后拖车行"].eq(""), "港后拖车行"] = "未分配/未记录"
+                counts = pd.crosstab(share_data["区域"], share_data["港后拖车行"])
+                if counts.empty:
+                    st.info("当前筛选范围内没有货柜记录。")
+                else:
+                    shares = counts.div(counts.sum(axis=1), axis=0).mul(100).round(2)
+                    st.bar_chart(shares, stack=True, height=320, x_label="运营区域", y_label="占比 (%)")
+                    with st.expander("查看各区域拖车商占比与柜量明细"):
+                        detail = (counts.stack().rename("柜量").to_frame()
+                                  .join(shares.stack().rename("占比 (%)"))
+                                  .reset_index().rename(columns={"港后拖车行": "港后拖车商"}))
+                        st.dataframe(detail.sort_values(["区域", "柜量"], ascending=[True, False]),
+                                     hide_index=True, use_container_width=True)
+                    if carrier != "全部":
+                        st.caption("当前已按单个拖车商筛选，图中占比仅代表筛选后的记录；选择左侧「全部」可查看真实区域分配占比。")
             with right:
                 st.subheader("近期船舶 / 航次")
                 ships = z.copy()
