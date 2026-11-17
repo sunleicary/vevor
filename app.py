@@ -155,24 +155,38 @@ if page == "运营总览":
                 ("LFD三天内", z["风险"].eq("LFD 3天内")),
                 ("到港未记录提柜", arrived & ~picked),
             ]
-            st.caption("点击下方柜量卡片，可展开对应的货柜明细。")
             selected_metric_key = f"overview_selected_metric_{i}"
-            for row_start in (0, 4):
-                metric_cols = st.columns(4, gap="small")
-                for offset, col in enumerate(metric_cols):
-                    metric_idx = row_start + offset
-                    label, mask = metric_masks[metric_idx]
-                    count = int(mask.sum())
-                    with col:
-                        with st.container(border=True):
-                            st.caption(label)
-                            st.markdown(f"### {count:,} 柜")
-                            if st.button("查看货柜明细", key=f"overview_metric_{i}_{metric_idx}",
-                                         use_container_width=True, disabled=count == 0):
-                                if st.session_state.get(selected_metric_key) == metric_idx:
-                                    st.session_state[selected_metric_key] = None
-                                else:
-                                    st.session_state[selected_metric_key] = metric_idx
+            # Style only the clickable KPI numbers; preserve the original compact 8-column layout.
+            st.markdown("""
+            <style>
+            div[class*="st-key-overview_metric_"] button {
+                border: 0 !important;
+                background: transparent !important;
+                box-shadow: none !important;
+                padding: 0 !important;
+                min-height: 2rem !important;
+                justify-content: flex-start !important;
+            }
+            div[class*="st-key-overview_metric_"] button p {
+                font-size: 1.65rem !important;
+                font-weight: 650 !important;
+                line-height: 1.2 !important;
+            }
+            div[class*="st-key-overview_metric_"] button:hover p {
+                text-decoration: underline;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            for metric_idx, (col, (label, mask)) in enumerate(zip(st.columns(8), metric_masks)):
+                count = int(mask.sum())
+                with col:
+                    st.caption(label)
+                    if st.button(f"{count:,}", key=f"overview_metric_{i}_{metric_idx}",
+                                 help=f"点击查看「{label}」的 {count:,} 条货柜记录",
+                                 disabled=count == 0):
+                        st.session_state[selected_metric_key] = (
+                            None if st.session_state.get(selected_metric_key) == metric_idx else metric_idx
+                        )
             selected_metric = st.session_state.get(selected_metric_key)
             if selected_metric is not None and 0 <= selected_metric < len(metric_masks):
                 detail_label, detail_mask = metric_masks[selected_metric]
