@@ -274,15 +274,57 @@ elif page == "运营总览":
                         if carrier != "全部":
                             st.caption("当前已筛选单个拖车商；选择左侧「全部」查看完整供应商占比。")
             if not z.empty:
-                with st.expander("📋 查看区域柜量及港后拖车商占比明细"):
-                    total = z["区域"].value_counts().rename_axis("区域").reset_index(name="总柜量")
-                    st.dataframe(total, hide_index=True, use_container_width=True)
-                    if not counts.empty:
-                        detail = (counts.stack().rename("柜量").to_frame()
-                                  .join(shares.stack().rename("占比 (%)"))
-                                  .reset_index().rename(columns={"港后拖车行": "港后拖车商"}))
-                        st.dataframe(detail.sort_values(["区域", "柜量"], ascending=[True, False]),
-                                     hide_index=True, use_container_width=True)
+                with st.expander("🔎 区域柜量及港后拖车商占比 · 条件查询"):
+                    st.caption("在当前 ETA、区域和拖车商全局筛选范围内进一步查询；占比以所选区域的全部货柜为分母。")
+                    query_data = z[["区域", "港后拖车行"]].copy()
+                    query_data["港后拖车商"] = query_data["港后拖车行"].fillna("").astype(str).str.strip()
+                    query_data.loc[query_data["港后拖车商"].eq(""), "港后拖车商"] = "未分配/未记录"
+                    query_regions = sorted(query_data["区域"].dropna().unique().tolist())
+                    qc1, qc2, qc3 = st.columns([1, 1.3, 1], gap="medium")
+                    with qc1:
+                        query_region = st.selectbox("运营区域", ["全部区域"] + query_regions,
+                                                    key=f"overview_query_region_{i}")
+                    region_scope = query_data if query_region == "全部区域" else query_data[
+                        query_data["区域"].eq(query_region)]
+                    query_vendors = sorted(region_scope["港后拖车商"].unique().tolist())
+                    with qc2:
+                        query_vendor = st.selectbox("港后拖车商", ["全部拖车商"] + query_vendors,
+                                                    key=f"overview_query_vendor_{i}")
+                    with qc3:
+                        query_view = st.selectbox("统计视图", ["供应商占比明细", "区域汇总", "货柜记录"],
+                                                  key=f"overview_query_view_{i}")
+                    query_filtered = region_scope if query_vendor == "全部拖车商" else region_scope[
+                        region_scope["港后拖车商"].eq(query_vendor)]
+                    # Denominators stay based on the entire region after the global filters,
+                    # so choosing one vendor does not incorrectly inflate its share to 100%.
+                    region_totals = query_data.groupby("区域").size().rename("区域总柜量")
+                    detail_counts = (query_filtered.groupby(["区域", "港后拖车商"])
+                                     .size().rename("供应商柜量").reset_index())
+                    detail_counts = detail_counts.merge(region_totals.reset_index(), on="区域", how="left")
+                    detail_counts["占比 (%)"] = (
+                        detail_counts["供应商柜量"].div(detail_counts["区域总柜量"]).mul(100).round(2))
+                    detail_counts = detail_counts.sort_values(
+                        ["区域", "供应商柜量"], ascending=[True, False])
+                    st.caption(f"当前匹配 {len(query_filtered):,} 柜 · "
+                               f"区域基数 {len(region_scope):,} 柜")
+                    if query_view == "供应商占比明细":
+                        st.dataframe(detail_counts, hide_index=True, use_container_width=True)
+                        result_csv = detail_counts.to_csv(index=False).encode("utf-8-sig")
+                    elif query_view == "区域汇总":
+                        region_summary = (query_filtered.groupby("区域").size().rename("匹配柜量")
+                                          .reset_index().merge(region_totals.reset_index(), on="区域"))
+                        region_summary["占比 (%)"] = (
+                            region_summary["匹配柜量"].div(region_summary["区域总柜量"]).mul(100).round(2))
+                        st.dataframe(region_summary, hide_index=True, use_container_width=True)
+                        result_csv = region_summary.to_csv(index=False).encode("utf-8-sig")
+                    else:
+                        matched_rows = z.loc[query_filtered.index].copy()
+                        grid(matched_rows, key=f"overview_query_containers_{i}")
+                        result_csv = None
+                    if result_csv is not None:
+                        st.download_button("导出当前查询结果 CSV", result_csv,
+                                           file_name="区域港后拖车商占比查询.csv",
+                                           mime="text/csv", key=f"overview_query_export_{i}")
 
             st.markdown("### 🚢 近期船舶与到港计划")
             with st.container(border=True):
