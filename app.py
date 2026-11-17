@@ -66,10 +66,24 @@ if page == "数据管理":
         st.error("为防止公开网页被任意人员上传或覆盖业务数据，请先在 Streamlit App settings → Secrets 配置 ADMIN_PASSWORD。")
         st.code('ADMIN_PASSWORD = "请设置一个强密码"', language="toml")
         st.stop()
-    supplied_password = st.text_input("数据管理员密码", type="password")
-    if supplied_password != admin_password:
-        st.info("输入管理员密码后可上传文件。")
+    import hmac
+    if not st.session_state.get("data_admin_authenticated", False):
+        with st.form("data_admin_login", clear_on_submit=True):
+            supplied_password = st.text_input("数据管理员密码", type="password")
+            submitted = st.form_submit_button("登录数据管理", type="primary")
+        if submitted:
+            if hmac.compare_digest(supplied_password.encode("utf-8"), str(admin_password).encode("utf-8")):
+                st.session_state.data_admin_authenticated = True
+                st.rerun()
+            else:
+                st.error("管理员密码不正确，请检查 Streamlit Cloud → App settings → Secrets 中的 ADMIN_PASSWORD。")
+        else:
+            st.info("输入管理员密码后，点击「登录数据管理」。")
         st.stop()
+    st.success("管理员验证成功，可以上传业务数据。")
+    if st.button("退出数据管理"):
+        st.session_state.data_admin_authenticated = False
+        st.rerun()
     uploaded = st.file_uploader("上传 HTML 表格导出格式的 .xls / .html 文件", type=["xls", "html", "htm"])
     if uploaded is not None and st.button("确认导入并替换当前数据库", type="primary"):
         with tempfile.NamedTemporaryFile(suffix=".xls", delete=False) as tmp:
