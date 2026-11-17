@@ -152,38 +152,54 @@ if page == "运营总览":
                      ("到港未记录提柜", (arrived & ~picked).sum())]
             for col, (label, value) in zip(st.columns(8), stats):
                 col.metric(label, f"{value:,}")
-            left, right = st.columns(2)
-            with left:
-                st.subheader("各区域港后拖车商占比")
-                st.caption("按港后拖车行字段统计；分母为当前筛选条件下该区域全部货柜（含未分配拖车商）。")
-                share_data = z[["区域", "港后拖车行"]].copy()
-                share_data["港后拖车行"] = share_data["港后拖车行"].fillna("").astype(str).str.strip()
-                share_data.loc[share_data["港后拖车行"].eq(""), "港后拖车行"] = "未分配/未记录"
-                counts = pd.crosstab(share_data["区域"], share_data["港后拖车行"])
-                if counts.empty:
-                    st.info("当前筛选范围内没有货柜记录。")
-                else:
-                    shares = counts.div(counts.sum(axis=1), axis=0).mul(100).round(2)
-                    st.bar_chart(shares, stack=True, height=320, x_label="运营区域", y_label="占比 (%)")
-                    with st.expander("查看各区域拖车商占比与柜量明细"):
+            st.markdown("### 📊 区域业务与拖车商分配")
+            chart_left, chart_right = st.columns([1, 1], gap="large")
+            with chart_left:
+                with st.container(border=True):
+                    st.markdown("#### 各区域总业务柜量")
+                    st.caption("单位：柜 · 当前筛选范围")
+                    volume = z["区域"].value_counts().sort_values(ascending=True)
+                    if volume.empty:
+                        st.info("当前范围内暂无货柜记录")
+                    else:
+                        st.bar_chart(volume, horizontal=True, height=350,
+                                     x_label="柜量", y_label="运营区域")
+            with chart_right:
+                with st.container(border=True):
+                    st.markdown("#### 各区域港后拖车商占比")
+                    st.caption("100% 堆叠 · 按港后拖车行统计（含未分配）")
+                    share_data = z[["区域", "港后拖车行"]].copy()
+                    share_data["港后拖车行"] = share_data["港后拖车行"].fillna("").astype(str).str.strip()
+                    share_data.loc[share_data["港后拖车行"].eq(""), "港后拖车行"] = "未分配/未记录"
+                    counts = pd.crosstab(share_data["区域"], share_data["港后拖车行"])
+                    if counts.empty:
+                        st.info("当前范围内暂无货柜记录")
+                    else:
+                        shares = counts.div(counts.sum(axis=1), axis=0).mul(100).round(2)
+                        st.bar_chart(shares, stack=True, height=350,
+                                     x_label="运营区域", y_label="占比 (%)")
+                        if carrier != "全部":
+                            st.caption("当前已筛选单个拖车商；选择左侧「全部」查看完整供应商占比。")
+            if not z.empty:
+                with st.expander("📋 查看区域柜量及港后拖车商占比明细"):
+                    total = z["区域"].value_counts().rename_axis("区域").reset_index(name="总柜量")
+                    st.dataframe(total, hide_index=True, use_container_width=True)
+                    if not counts.empty:
                         detail = (counts.stack().rename("柜量").to_frame()
                                   .join(shares.stack().rename("占比 (%)"))
                                   .reset_index().rename(columns={"港后拖车行": "港后拖车商"}))
                         st.dataframe(detail.sort_values(["区域", "柜量"], ascending=[True, False]),
                                      hide_index=True, use_container_width=True)
-                    if carrier != "全部":
-                        st.caption("当前已按单个拖车商筛选，图中占比仅代表筛选后的记录；选择左侧「全部」可查看真实区域分配占比。")
-            with right:
-                st.subheader("近期船舶 / 航次")
+
+            st.markdown("### 🚢 近期船舶与到港计划")
+            with st.container(border=True):
                 ships = z.copy()
                 ships["船舶/航次"] = ships["实际船名"].fillna("未知") + " / " + ships["实际航次"].fillna("未知")
-                # Keep vessel/voyage summaries distinct when recorded arrival dates differ.
-                # ATA and ETA are sourced from uploaded records, never inferred.
                 ships["预计到港 ETA"] = ships["ETA日期_dt"].dt.strftime("%Y-%m-%d").fillna("未记录")
                 ships["实际到港 ATA"] = ships["ATA日期_dt"].dt.strftime("%Y-%m-%d").fillna("未记录")
                 summary = (ships.groupby(["船公司", "船舶/航次", "预计到港 ETA", "实际到港 ATA"], dropna=False)
                            .size().reset_index(name="柜量"))
-                st.dataframe(summary.sort_values(["柜量", "实际到港 ATA"], ascending=[False, False]).head(12),
+                st.dataframe(summary.sort_values(["柜量", "实际到港 ATA"], ascending=[False, False]).head(20),
                              hide_index=True, use_container_width=True)
             st.subheader("重点货柜明细")
             choices = st.multiselect("风险筛选", ["LFD已过/提箱待核实", "LFD 3天内", "提箱晚于LFD", "缺少LFD"],
