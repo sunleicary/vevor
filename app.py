@@ -153,6 +153,19 @@ elif page == "运营总览":
         with tab:
             z = q if name is None else q[q["区域"] == name]
             st.subheader(name or "美国港后运营总览")
+            if len(eta_range) == 2:
+                st.markdown(
+                    f'<div style="display:inline-flex;align-items:center;gap:9px;'
+                    f'background:#e8f2ff;border:1px solid #bdd5fa;border-left:4px solid #ff5a19;'
+                    f'border-radius:8px;padding:7px 13px;margin:0 0 12px 0;'
+                    f'color:#09275d;font-weight:700;font-size:.91rem">'
+                    f'📅 ETA 统计窗口：{eta_range[0]:%Y/%m/%d} — {eta_range[1]:%Y/%m/%d}'
+                    f' <span style="font-weight:400;color:#4b6a9b">｜按预计到港日期统计 · 随左侧筛选同步更新</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.caption("ETA 统计窗口：请选择完整的开始和结束日期")
             arrived = z["ATA日期_dt"].notna()
             picked = z["进口实际提箱时间_dt"].notna()
             delivered = z["实际送仓时间_dt"].notna()
