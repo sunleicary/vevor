@@ -98,10 +98,27 @@ def show_supplier_overview(df, grid):
                         continue
                     pending_r=int(area["供应商"].eq("待分配/未记录").sum())
                     st.progress((n-pending_r)/n,text=f"已分配 {(n-pending_r)/n:.1%} · 待分配 {pending_r:,} 柜")
-                    share=area["供应商"].value_counts().head(6)
-                    share_df=pd.DataFrame({"港后拖车商":share.index,"柜量":share.values})
-                    share_df["占比"]=share_df["柜量"].div(n).mul(100).map(lambda v:f"{v:.1f}%")
-                    st.dataframe(share_df,hide_index=True,use_container_width=True,height=245)
+                    share=area["供应商"].value_counts()
+                    # Keep the six largest vendors visible and consolidate the remainder.
+                    if len(share)>6:
+                        share=pd.concat([share.iloc[:6],pd.Series({"其他供应商":int(share.iloc[6:].sum())})])
+                    pie_data=pd.DataFrame({"供应商":share.index,"柜量":share.values})
+                    pie_data["占比"]=pie_data["柜量"].div(n).mul(100).round(1)
+                    pie_spec={
+                        "data":{"values":pie_data.to_dict("records")},
+                        "mark":{"type":"arc","outerRadius":105,"innerRadius":46},
+                        "encoding":{
+                            "theta":{"field":"柜量","type":"quantitative","stack":True},
+                            "color":{"field":"供应商","type":"nominal",
+                                     "scale":{"range":PALETTE},
+                                     "legend":{"orient":"bottom","columns":2,"labelLimit":145}},
+                            "tooltip":[{"field":"供应商","type":"nominal"},
+                                       {"field":"柜量","type":"quantitative","format":","},
+                                       {"field":"占比","type":"quantitative","format":".1f","title":"占比 (%)"}]
+                        },
+                        "view":{"stroke":None}
+                    }
+                    st.vega_lite_chart(pie_spec,use_container_width=True,key=f"supplier_pie_{REGION_SHORT[r]}")
 
     st.markdown('<div class="supplier-section">📋 分配明细与业务查询</div>',unsafe_allow_html=True)
     t1,t2,t3=st.tabs(["区域汇总","供应商 × 区域","月度分配"])
