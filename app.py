@@ -228,8 +228,49 @@ elif page == "运营总览":
                         st.info("当前范围内暂无货柜记录")
                     else:
                         shares = counts.div(counts.sum(axis=1), axis=0).mul(100).round(2)
-                        st.bar_chart(shares, stack=True, height=350,
-                                     x_label="运营区域", y_label="占比 (%)")
+                        chart_rows = (counts.stack().rename("柜量").to_frame()
+                                      .join(shares.stack().rename("占比"))
+                                      .reset_index().rename(columns={"港后拖车行": "港后拖车商"}))
+                        chart_rows["区域总柜量"] = chart_rows.groupby("区域")["柜量"].transform("sum")
+                        chart_rows["图上标签"] = chart_rows.apply(
+                            lambda row: f'{int(row["柜量"]):,}柜 · {row["占比"]:.1f}%',
+                            axis=1)
+                        base_encoding = {
+                            "y": {"field": "区域", "type": "nominal", "title": "运营区域",
+                                  "sort": list(counts.index)},
+                            "x": {"field": "占比", "type": "quantitative", "stack": "zero",
+                                  "title": "占比 (%)", "scale": {"domain": [0, 100]}},
+                            "color": {"field": "港后拖车商", "type": "nominal",
+                                      "legend": {"orient": "bottom", "title": "港后拖车商"}},
+                            "order": {"field": "港后拖车商", "type": "nominal"},
+                            "tooltip": [
+                                {"field": "区域", "type": "nominal"},
+                                {"field": "港后拖车商", "type": "nominal"},
+                                {"field": "柜量", "type": "quantitative", "format": ","},
+                                {"field": "占比", "type": "quantitative", "format": ".2f", "title": "占比 (%)"},
+                                {"field": "区域总柜量", "type": "quantitative", "format": ","},
+                            ],
+                        }
+                        st.vega_lite_chart({
+                            "data": {"values": chart_rows.to_dict("records")},
+                            "height": 290,
+                            "layer": [
+                                {"mark": {"type": "bar", "cornerRadiusEnd": 2},
+                                 "encoding": base_encoding},
+                                {"transform": [{"filter": "datum['占比'] >= 13"}],
+                                 "mark": {"type": "text", "color": "white", "fontSize": 10,
+                                          "fontWeight": "bold", "baseline": "middle"},
+                                 "encoding": {
+                                     "y": base_encoding["y"],
+                                     "x": base_encoding["x"],
+                                     "detail": {"field": "港后拖车商", "type": "nominal"},
+                                     "order": base_encoding["order"],
+                                     "text": {"field": "图上标签", "type": "nominal"},
+                                 }},
+                            ],
+                            "view": {"stroke": None},
+                        }, use_container_width=True, key=f"overview_supplier_share_{i}")
+                        st.caption("色块显示柜量与占比；占比不足13%的色块请悬停查看，避免标签重叠。")
                         if carrier != "全部":
                             st.caption("当前已筛选单个拖车商；选择左侧「全部」查看完整供应商占比。")
             if not z.empty:
