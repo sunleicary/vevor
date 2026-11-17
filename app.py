@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 from import_data import DB, load
 from container_detail import show_container_detail
+from supplier_overview import show_supplier_overview
 
 st.set_page_config(page_title="司顺国际物流港后运营工作台", page_icon="🚢", layout="wide")
 st.markdown("""<style>
@@ -49,7 +50,7 @@ def grid(data, key="default"):
                        key=f"download_csv_{key}")
 
 with st.sidebar:
-    page = st.radio("业务模块", ["运营总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "数据管理"])
+    page = st.radio("业务模块", ["运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "数据管理"])
     st.caption("供应商仅使用“港后拖车行”字段，不混用港前拖车商。")
 
 # Allow first-time cloud imports before attempting to read the database.
@@ -133,7 +134,9 @@ q.loc[lfd.notna() & pickup.notna() & (pickup.dt.normalize() > lfd.dt.normalize()
 q.loc[lfd.notna() & pickup.notna() & (pickup.dt.normalize() <= lfd.dt.normalize()), "风险"] = "已按LFD提箱"
 q["柜号显示"] = q["箱号"].replace("", pd.NA).fillna(q["排柜单号"])
 
-if page == "运营总览":
+if page == "全美港后供应商总览":
+    show_supplier_overview(df, grid)
+elif page == "运营总览":
     names = [None, "新泽西 NJ", "萨凡纳 SAV", "洛杉矶 LA/LB", "休斯顿 HOU", "芝加哥 CHI", "亚特兰大 ATL"]
     tabs = st.tabs(["🇺🇸 全美总览", "🗽 新泽西 NJ", "🚢 萨凡纳 SAV", "⚓ 洛杉矶 LA/LB",
                     "🚛 休斯顿 HOU", "🚆 芝加哥 CHI", "🏭 亚特兰大 ATL"])
