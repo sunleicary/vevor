@@ -8,18 +8,16 @@ import streamlit as st
 from import_data import DB, load
 from container_detail import show_container_detail
 from supplier_overview import show_supplier_overview
+from theme import apply_theme
 
 st.set_page_config(page_title="司顺国际物流港后运营工作台", page_icon="🚢", layout="wide")
-st.markdown("""<style>
-.stApp{background:linear-gradient(120deg,#f6f9ff,#eaf2ff);color:#071b51}
-[data-testid="stSidebar"]{background:#092550}
-[data-testid="stSidebar"] *{color:white!important}
-[data-testid="stMetric"]{background:white;border:1px solid #d5e4ff;border-radius:12px;padding:12px}
-[data-testid="stMetricValue"]{color:#1154dc}
-.brand{background:white;padding:18px;border-bottom:4px solid #ff510c;border-radius:10px;font-size:25px;font-weight:800;color:#071b60}
-</style>""", unsafe_allow_html=True)
-st.markdown('<div class="brand">🚢 司顺国际物流港后运营工作台 · V2.1</div>', unsafe_allow_html=True)
-st.caption("美国六区 · 港后拖车行口径 · 非实时码头数据")
+apply_theme()
+st.markdown("""<div class="vevor-topbar">
+  <div class="vevor-logo">VEVOR®</div>
+  <div class="vevor-divider"></div>
+  <div class="vevor-title">国际物流港后运营工作台 <span style="font-weight:500">|</span> 美国港口运营管理</div>
+  <div class="vevor-tag">数据驱动 · 异常预警 · 高效提柜</div>
+</div><div class="vevor-subtitle">美国六大运营区域 · 港后拖车行统计口径 · 数据来自最近一次上传，非实时码头状态</div>""",unsafe_allow_html=True)
 
 @st.cache_data(show_spinner=False)
 def read_db(mtime):
@@ -60,6 +58,7 @@ def grid(data, key="default"):
                        key=f"download_csv_{key}")
 
 with st.sidebar:
+    st.markdown('<div class="vevor-sidebar-logo">VEVOR®<span>美国港后运营管理</span></div>', unsafe_allow_html=True)
     page = st.radio("业务模块", ["运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "数据管理"])
     st.caption("供应商仅使用“港后拖车行”字段，不混用港前拖车商。")
 
@@ -169,27 +168,6 @@ elif page == "运营总览":
                 ("到港未记录提柜", arrived & ~picked),
             ]
             selected_metric_key = f"overview_selected_metric_{i}"
-            # Style only the clickable KPI numbers; preserve the original compact 8-column layout.
-            st.markdown("""
-            <style>
-            div[class*="st-key-overview_metric_"] button {
-                border: 0 !important;
-                background: transparent !important;
-                box-shadow: none !important;
-                padding: 0 !important;
-                min-height: 2rem !important;
-                justify-content: flex-start !important;
-            }
-            div[class*="st-key-overview_metric_"] button p {
-                font-size: 1.65rem !important;
-                font-weight: 650 !important;
-                line-height: 1.2 !important;
-            }
-            div[class*="st-key-overview_metric_"] button:hover p {
-                text-decoration: underline;
-            }
-            </style>
-            """, unsafe_allow_html=True)
             for metric_idx, (col, (label, mask)) in enumerate(zip(st.columns(8), metric_masks)):
                 count = int(mask.sum())
                 with col:
