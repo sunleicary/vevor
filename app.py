@@ -329,13 +329,44 @@ elif page == "运营总览":
             st.markdown("### 🚢 近期船舶与到港计划")
             with st.container(border=True):
                 ships = z.copy()
-                ships["船舶/航次"] = ships["实际船名"].fillna("未知") + " / " + ships["实际航次"].fillna("未知")
+                ships["船舶/航次"] = (
+                    ships["实际船名"].fillna("").astype(str).str.strip().replace("", "未记录")
+                    + " / " +
+                    ships["实际航次"].fillna("").astype(str).str.strip().replace("", "未记录"))
+                ships["卸货港"] = ships["卸货港"].fillna("").astype(str).str.strip().replace("", "未记录")
+                terminal_candidates = ["卸货码头", "目的港码头", "码头", "Terminal"]
+                ships["停靠码头"] = pd.Series(pd.NA, index=ships.index, dtype="string")
+                for terminal_col in terminal_candidates:
+                    if terminal_col in ships.columns:
+                        candidate = ships[terminal_col].astype("string").str.strip().replace("", pd.NA)
+                        ships["停靠码头"] = ships["停靠码头"].fillna(candidate)
+                ships["停靠码头"] = ships["停靠码头"].fillna("未记录")
                 ships["预计到港 ETA"] = ships["ETA日期_dt"].dt.strftime("%Y-%m-%d").fillna("未记录")
                 ships["实际到港 ATA"] = ships["ATA日期_dt"].dt.strftime("%Y-%m-%d").fillna("未记录")
-                summary = (ships.groupby(["船公司", "船舶/航次", "预计到港 ETA", "实际到港 ATA"], dropna=False)
-                           .size().reset_index(name="柜量"))
-                st.dataframe(summary.sort_values(["柜量", "实际到港 ATA"], ascending=[False, False]).head(20),
-                             hide_index=True, use_container_width=True)
+                discharge_dt = pd.to_datetime(
+                    ships["目的港/站卸柜日期"], errors="coerce", format="mixed")
+                ships["卸柜日期"] = discharge_dt.dt.strftime("%Y-%m-%d").fillna("未记录")
+                ships["船公司"] = ships["船公司"].fillna("").astype(str).str.strip().replace("", "未记录")
+                summary = (
+                    ships.groupby(["船公司", "船舶/航次", "卸货港", "停靠码头",
+                                   "预计到港 ETA", "实际到港 ATA", "卸柜日期"],
+                                  dropna=False)
+                    .size().reset_index(name="柜量"))
+                summary["_sort_eta"] = pd.to_datetime(summary["预计到港 ETA"], errors="coerce")
+                summary = summary.sort_values(
+                    ["_sort_eta", "船公司", "船舶/航次"], ascending=[True, True, True],
+                    na_position="last").drop(columns="_sort_eta")
+                st.caption(f"共 {len(summary):,} 条船舶靠港计划记录，涉及 {len(ships):,} 柜；"
+                           "按卸货港和码头区分，ETA 从早到晚排列。")
+                if ships["停靠码头"].eq("未记录").all():
+                    st.info("当前数据库尚无停靠码头信息。已显示卸货港；如源文件包含码头字段，"
+                            "请在数据管理重新上传，以便补充码头信息。")
+                st.dataframe(summary, hide_index=True, use_container_width=True, height=420)
+                st.download_button(
+                    "导出船舶靠港计划 CSV",
+                    summary.to_csv(index=False).encode("utf-8-sig"),
+                    file_name="美国港后船舶靠港计划.csv",
+                    mime="text/csv", key=f"ship_schedule_export_{i}")
             st.subheader("重点货柜明细")
             choices = st.multiselect("风险筛选", ["LFD已过/提箱待核实", "LFD 3天内", "提箱晚于LFD", "缺少LFD"],
                                     default=["LFD已过/提箱待核实", "LFD 3天内", "提箱晚于LFD"],
