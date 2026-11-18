@@ -64,7 +64,7 @@ with st.sidebar:
     st.markdown('<div class="vevor-sidebar-logo">VEVOR®<span>美国港后运营管理</span></div>', unsafe_allow_html=True)
     st.caption(f'当前用户：{user["username"]} · {user["role"]}')
     pages = ["运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析"]
-    if user["role"] in ("管理员", "运营人员"):
+    if user["role"] == "管理员":
         pages.append("数据管理")
     if user["role"] == "管理员":
         pages.append("用户管理")
@@ -85,6 +85,9 @@ if page == "我的账号":
 
 # Allow first-time cloud imports before attempting to read the database.
 if page == "数据管理":
+    if user["role"] != "管理员":
+        st.error("权限不足：仅管理员可访问数据管理及上传业务数据。")
+        st.stop()
     st.subheader("业务数据管理")
     st.caption("上传文件仅保存在当前 Streamlit 实例中；免费云端本地数据库不保证持久保存。")
     if not os.path.exists(DB):
