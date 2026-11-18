@@ -99,13 +99,11 @@ def summary(conn, month, supplier=None, region=None):
             warnings.append(f"{metric}：{unknown:,} 条记录的考核状态无法判定，指标值暂不计算")
     return pd.DataFrame(output), warnings
 
-def details(conn, month, metric, supplier=None, region=None, limit=100, offset=0):
+def detail_page(conn, month, metric, supplier=None, region=None, limit=100, offset=0):
+    """Read only one page. Count is supplied by the already computed KPI summary."""
     suffix, extra = filters(supplier, region)
     where = f"{BASE} {suffix} AND metric=?"
     arguments = params(month) + tuple(extra) + (metric,)
-    count = int(read_sql(f"SELECT count(*) AS n FROM kpi_raw_rows_v2 WHERE {where}",
-                         conn, params=arguments).iloc[0]["n"])
-    rows = read_sql(f"""SELECT source_row, payload FROM kpi_raw_rows_v2
+    return read_sql(f"""SELECT source_row, payload FROM kpi_raw_rows_v2
         WHERE {where} ORDER BY source_row LIMIT ? OFFSET ?""",
-        conn, params=arguments + (limit, offset))
-    return count, rows
+        conn, params=arguments + (min(max(int(limit), 1), 100), max(int(offset), 0)))
