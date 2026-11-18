@@ -52,29 +52,46 @@ def show_global_overview(df):
     if "ETA日期_dt" not in data:
         data["ETA日期_dt"] = pd.to_datetime(data["ETA日期"], errors="coerce", format="mixed")
     valid = data["ETA日期_dt"].dropna()
-    if valid.empty:
-        st.warning("当前数据库没有有效 ETA 日期，无法按 ETA 统计全球业务量。")
-        return
     years = sorted(valid.dt.year.unique().astype(int).tolist(), reverse=True)
-    default_year = 2026 if 2026 in years else years[0]
-    a, b, c = st.columns([1, 2, 2])
+    a, b, c = st.columns([1.2, 1.6, 2.2])
     with a:
-        year = st.selectbox("统计年份（ETA）", years, index=years.index(default_year), key="global_year")
+        mode = st.radio("统计口径", ["全部历史记录", "按ETA日期"], horizontal=False, key="global_mode")
     with b:
-        dates = st.date_input("ETA 统计区间", (date(year, 1, 1), date(year, 12, 31)),
-                              key=f"global_dates_{year}")
+        if mode == "按ETA日期" and years:
+            default_year = 2026 if 2026 in years else years[0]
+            year = st.selectbox("ETA年份", years, index=years.index(default_year), key="global_year")
+            dates = st.date_input("ETA 统计区间", (date(year, 1, 1), date(year, 12, 31)),
+                                  key=f"global_dates_{year}")
+        else:
+            dates = None
+            st.caption("全部历史记录包含无 ETA 的货柜；趋势图仅统计有 ETA 的记录。")
     with c:
         countries = sorted(data["国家"].unique().tolist())
         selected = st.multiselect("目的仓国家", countries, default=countries, key="global_countries")
-    if len(dates) != 2:
-        st.info("请选择完整的 ETA 起止日期。")
-        return
-    z = data[data["国家"].isin(selected) & data["ETA日期_dt"].between(
-        pd.Timestamp(dates[0]), pd.Timestamp(dates[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1))].copy()
+    z = data[data["国家"].isin(selected)].copy()
+    if mode == "按ETA日期":
+        if not years:
+            st.warning("数据库没有有效 ETA 日期。请切换到全部历史记录。")
+            return
+        if len(dates) != 2:
+            st.info("请选择完整的 ETA 起止日期。")
+            return
+        z = z[z["ETA日期_dt"].between(pd.Timestamp(dates[0]),
+              pd.Timestamp(dates[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1))].copy()
     if z.empty:
         st.info("当前国家和 ETA 范围内没有记录。")
         return
     z["月份"] = z["ETA日期_dt"].dt.strftime("%Y-%m")
+    missing_eta = int(z["ETA日期_dt"].isna().sum())
+    for field in ("ATA日期", "LFD", "进口实际提箱时间", "实际送仓时间", "实际还柜日期"):
+        z[field + "_parsed"] = pd.to_datetime(z[field], errors="coerce", format="mixed")
+    today = pd.Timestamp(date.today())
+    lfd = z["LFD_parsed"]
+    picked = z["进口实际提箱时间_parsed"].notna()
+    z["LFD状态"] = "正常/待核实"
+    z.loc[lfd.isna(), "LFD状态"] = "缺少LFD"
+    z.loc[lfd.notna() & ~picked & (lfd < today), "LFD状态"] = "LFD已过/提箱待核实"
+    z.loc[lfd.notna() & ~picked & (lfd >= today) & (lfd < today + pd.Timedelta(days=3)), "LFD状态"] = "LFD三天内"
     total = len(z)
     pending = int(z["港后供应商"].eq("待分配/未记录").sum())
     country_counts = z["国家"].value_counts()
@@ -84,11 +101,11 @@ def show_global_overview(df):
         ("已分配柜量", f"{total-pending:,} 柜"),
         ("待分配/未记录", f"{pending:,} 柜"),
         ("已分配比例", f"{(total-pending)/total:.1%}"),
-        ("最大业务国家", country_counts.index[0]),
+        ("缺少ETA", f"{missing_eta:,} 柜"),
     ]
     for col, (label, value) in zip(st.columns(6), metrics):
         col.metric(label, value)
-    st.caption("口径：目的仓国家 + ETA；按原始数据行计数（非去重箱号）。"
+    st.caption(f"口径：目的仓国家 · {mode}；按原始数据行计数（非去重箱号）。"
                "「港后拖车测试」及空白供应商视为待分配；供应商字段有值不等于已确认运力。")
     left, right = st.columns([1.1, 1], gap="large")
     with left:
@@ -97,11 +114,35 @@ def show_global_overview(df):
                      x_label="柜量", y_label="目的仓国家")
     with right:
         st.markdown("#### 📈 全球月度业务趋势")
-        st.bar_chart(z.groupby("月份").size().rename("柜量"), height=320, x_label="ETA月份", y_label="柜量")
+        monthly = z.dropna(subset=["ETA日期_dt"]).groupby("月份").size().rename("柜量")
+        if not monthly.empty:
+            st.bar_chart(monthly, height=320, x_label="ETA月份", y_label="柜量")
+        else:
+            st.info("当前筛选结果没有可用于月度趋势的 ETA。")
         st.markdown("#### 🚛 港后供应商分配结构")
         st.bar_chart(z["港后供应商"].value_counts().head(12).sort_values(), horizontal=True,
                      height=300, x_label="柜量", y_label="港后供应商")
-    st.markdown("#### 📋 国家业务量与供应商分配")
+    st.markdown("#### ⚓ 全球港后运营进度与 LFD 风险")
+    status_counts = [
+        ("已到港（有ATA记录）", int(z["ATA日期_parsed"].notna().sum())),
+        ("已提柜（有提箱记录）", int(picked.sum())),
+        ("已送仓（有送仓记录）", int(z["实际送仓时间_parsed"].notna().sum())),
+        ("已还空（有还柜记录）", int(z["实际还柜日期_parsed"].notna().sum())),
+        ("LFD已过/提箱待核实", int(z["LFD状态"].eq("LFD已过/提箱待核实").sum())),
+        ("LFD三天内", int(z["LFD状态"].eq("LFD三天内").sum())),
+    ]
+    for col, (label, value) in zip(st.columns(6), status_counts):
+        col.metric(label, f"{value:,}")
+    st.caption("运营状态按原始里程碑字段是否有记录统计；LFD 仅为数据预警，"
+               "缺少提箱记录不代表实际未提箱。不同国家的 LFD 业务规则可能不同，需人工核实。")
+    risk = z[z["LFD状态"].isin(["LFD已过/提箱待核实", "LFD三天内"])]
+    if not risk.empty:
+        with st.expander(f"⚠️ 全球 LFD 预警明细 · {len(risk):,} 条", expanded=False):
+            risk_fields = ["国家", "箱号", "排柜单号", "目的仓", "港后供应商",
+                           "ETA日期", "LFD", "进口实际提箱时间", "LFD状态"]
+            st.dataframe(risk[[v for v in risk_fields if v in risk.columns]],
+                         hide_index=True, use_container_width=True, height=330)
+        st.markdown("#### 📋 国家业务量与供应商分配")
     summary = z.groupby("国家").size().rename("总柜量").to_frame()
     pending_by_country = z[z["港后供应商"].eq("待分配/未记录")].groupby("国家").size()
     summary["待分配/未记录"] = pending_by_country.reindex(summary.index, fill_value=0)
@@ -131,5 +172,5 @@ def show_global_overview(df):
         st.dataframe(visible, hide_index=True, use_container_width=True, height=400)
         st.download_button("导出当前货柜明细 CSV", visible.to_csv(index=False).encode("utf-8-sig"),
                            "全球港后货柜明细.csv", "text/csv", key="global_detail_export")
-    st.info("全球分析仅覆盖当前已导入数据库的数据。若此前导入时仅保留美国记录，"
-            "需要管理员重新上传包含全球国家的完整源文件，才会显示其他国家。")
+    st.info("本页只分析已导入 SQLite 的记录。历史数据库若仅含美国数据，"
+            "请管理员备份后重新上传全球完整源文件；导入会替换当前业务数据库。")
