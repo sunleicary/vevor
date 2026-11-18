@@ -2,6 +2,8 @@
 import json
 import os
 import sqlite3
+from db_backend import connect as db_connect, read_sql, is_neon
+from create_neon_schema import KPI_TABLES
 from datetime import datetime, timezone
 from io import BytesIO
 import pandas as pd
@@ -11,15 +13,16 @@ DB = os.environ.get("KPI_DB_PATH", os.path.join(os.path.dirname(__file__), "supp
 SHEETS = ["港后提柜及时率", "送仓准时率", "送仓时效", "提空及时率", "还柜及时率", "台账"]
 
 def connect():
-    conn = sqlite3.connect(DB, timeout=60)
-    conn.execute("""CREATE TABLE IF NOT EXISTS kpi_raw_rows_v2(
-        month TEXT NOT NULL, metric TEXT NOT NULL, source_row INTEGER NOT NULL,
-        payload TEXT NOT NULL, source_file TEXT NOT NULL, imported_at TEXT NOT NULL,
-        PRIMARY KEY(month,metric,source_row))""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS kpi_batches_v2(
-        month TEXT PRIMARY KEY, source_file TEXT NOT NULL, imported_at TEXT NOT NULL,
-        row_count INTEGER NOT NULL)""")
-    conn.commit()
+    conn = db_connect(DB, timeout=60)
+    if not is_neon():
+        conn.execute("""CREATE TABLE IF NOT EXISTS kpi_raw_rows_v2(
+            month TEXT NOT NULL, metric TEXT NOT NULL, source_row INTEGER NOT NULL,
+            payload TEXT NOT NULL, source_file TEXT NOT NULL, imported_at TEXT NOT NULL,
+            PRIMARY KEY(month,metric,source_row))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS kpi_batches_v2(
+            month TEXT PRIMARY KEY, source_file TEXT NOT NULL, imported_at TEXT NOT NULL,
+            row_count INTEGER NOT NULL)""")
+        conn.commit()
     return conn
 
 def parse_month(value, chosen_month):
@@ -88,8 +91,8 @@ def show_monthly_supplier_entry(df, user):
     st.caption("统一导入五项 KPI 与台账全球明细；送仓时效排除排柜单号为空的记录。台账分页展示，避免一次加载全部记录。")
     try:
         with connect() as conn:
-            batches = pd.read_sql_query("SELECT * FROM kpi_batches_v2 ORDER BY month DESC", conn)
-    except (sqlite3.Error, OSError) as exc:
+            batches = read_sql("SELECT * FROM kpi_batches_v2 ORDER BY month DESC", conn)
+    except Exception as exc:
         st.error(f"无法读取数据库：{exc}")
         return
     if user.get("role") == "管理员":
@@ -115,6 +118,24 @@ def show_monthly_supplier_entry(df, user):
                         conn.execute("""INSERT INTO kpi_batches_v2
                             (month,source_file,imported_at,row_count) VALUES (?,?,?,?)""",
                             (month,uploaded.name,timestamp,len(rows)))
+                        if is_neon():
+                            # Keep the six materialized KPI tables consistent with the legacy raw table.
+                            for metric, table in KPI_TABLES.items():
+                                conn.execute(f"DELETE FROM {table} WHERE month=?", (month,))
+                            for metric, table in KPI_TABLES.items():
+                                subset = []
+                                for m, sheet, source_row, payload in rows:
+                                    if sheet != metric:
+                                        continue
+                                    data = json.loads(payload)
+                                    subset.append((m, source_row,
+                                                   str(data.get("排柜单号", "")).strip(),
+                                                   str(data.get("港后拖车行", "")).strip(),
+                                                   payload, uploaded.name, timestamp))
+                                conn.executemany(
+                                    f"""INSERT INTO {table}
+                                    (month,source_row,order_no,supplier,payload,source_file,imported_at)
+                                    VALUES (?,?,?,?,?::jsonb,?,?)""", subset)
                         conn.commit()
                     st.success(f"已保存 {len(rows):,} 条原始明细。")
                     st.dataframe(pd.DataFrame([{"指标":k,"导入记录数":v} for k,v in counts.items()]),
@@ -185,5 +206,4 @@ def show_monthly_supplier_entry(df, user):
                 detail.to_csv(index=False).encode("utf-8-sig"),
                 file_name=f"{selected}_{metric}_全球全部明细.csv",
                 mime="text/csv",key=f"kpi_global_export_{metric}")
-    st.warning("SQLite 文件默认位于应用本地磁盘。Streamlit Community Cloud 重启或重新部署可能清除数据；"
-               "正式持久化需使用外部数据库或持久化存储。")
+    st.caption("当前数据后端：" + ("Neon PostgreSQL（云端持久化）" if is_neon() else "SQLite（本地临时存储）"))
