@@ -61,6 +61,10 @@ class PgCursor:
         self._cursor.close()
     def __iter__(self):
         return iter(self._cursor)
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
 
 class PgConnection:
     def __init__(self, conn):
