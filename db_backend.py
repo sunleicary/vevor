@@ -47,10 +47,15 @@ class PgCursor:
     def executemany(self, query, params):
         self._cursor.executemany(_translate(query), params)
         return self
+    def _wrap(self, values):
+        if values is None:
+            return None
+        names = [c.name for c in self._cursor.description]
+        return Row(names, values)
     def fetchone(self):
-        return self._cursor.fetchone()
+        return self._wrap(self._cursor.fetchone())
     def fetchall(self):
-        return self._cursor.fetchall()
+        return [self._wrap(values) for values in self._cursor.fetchall()]
     @property
     def description(self):
         return self._cursor.description
@@ -60,7 +65,8 @@ class PgCursor:
     def close(self):
         self._cursor.close()
     def __iter__(self):
-        return iter(self._cursor)
+        for values in self._cursor:
+            yield self._wrap(values)
     def __enter__(self):
         return self
     def __exit__(self, exc_type, exc, tb):
@@ -70,7 +76,7 @@ class PgConnection:
     def __init__(self, conn):
         self._conn = conn
     def cursor(self):
-        return PgCursor(self._conn.cursor(row_factory=_row_factory))
+        return PgCursor(self._conn.cursor())
     def execute(self, query, params=None):
         return self.cursor().execute(query, params)
     def executemany(self, query, params):
