@@ -117,8 +117,7 @@ def show_supplier_kpi(df, user):
             if invalid.any() or evidence_missing.any():
                 st.error("状态不合法，或已确认的达标/不达标/免责记录缺少证据说明。")
             else:
-                to_save = changed[changed["考核结果"].ne("待核实") |
-                                  changed["证据说明"].fillna("").astype(str).str.strip().ne("")]
+                to_save = changed
                 try:
                     save_reviews(to_save, month, user.get("username", "管理员"))
                     st.success(f"已保存 {len(to_save)} 条记录至独立KPI数据库。")
