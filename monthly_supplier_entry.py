@@ -164,30 +164,55 @@ def show_monthly_supplier_entry(df, user):
             valid = raw.loc[mask, "payload"].map(
                 lambda p: bool(str(json.loads(p).get("排柜单号", "")).strip()))
             raw = raw.loc[~mask | raw.index.isin(valid.index[valid])].copy()
-    # Supplier identity comes exclusively from the 港后拖车行 column in each KPI sheet.
-    # Never infer post-port suppliers from 港前拖车行 or other vendor fields.
+    # Scope this dashboard to US records and region by 目的仓物流区域.
+    # Supplier attribution must come exclusively from 港后拖车行.
     if not raw.empty:
         raw = raw.copy()
-        raw["_supplier"] = raw["payload"].map(
-            lambda p: str(json.loads(p).get("港后拖车行", "") or "").strip())
+        payloads = raw["payload"].map(json.loads)
+        raw["_country"] = payloads.map(
+            lambda p: str(p.get("目的仓国家", "") or "").strip().upper())
+        raw["_region"] = payloads.map(
+            lambda p: str(p.get("目的仓物流区域", "") or "").strip())
+        raw["_supplier"] = payloads.map(
+            lambda p: str(p.get("港后拖车行", "") or "").strip())
+        us_names = {"美国", "US", "USA", "AMERICA",
+                    "UNITED STATES", "UNITED STATES OF AMERICA"}
+        raw = raw.loc[raw["_country"].isin(us_names)].copy()
     else:
-        raw["_supplier"] = pd.Series(dtype=str)
-    suppliers = sorted(v for v in raw["_supplier"].unique() if v)
+        raw = raw.copy()
+        for column in ("_country", "_region", "_supplier"):
+            raw[column] = pd.Series(dtype=str)
+
+    region_options = ["美国全区域"] + sorted(
+        v for v in raw["_region"].unique() if v)
+    if raw["_region"].eq("").any():
+        region_options.append("未填写区域")
+    selected_region = st.selectbox(
+        "美国目的仓物流区域", region_options, key="kpi_global_us_region")
+    if selected_region == "美国全区域":
+        region_raw = raw
+    elif selected_region == "未填写区域":
+        region_raw = raw.loc[raw["_region"].eq("")].copy()
+    else:
+        region_raw = raw.loc[raw["_region"].eq(selected_region)].copy()
+
+    suppliers = sorted(v for v in region_raw["_supplier"].unique() if v)
     supplier_options = ["全部供应商"] + suppliers
-    if raw["_supplier"].eq("").any():
+    if region_raw["_supplier"].eq("").any():
         supplier_options.append("未填写港后拖车行")
     selected_supplier = st.selectbox(
         "港后拖车供应商", supplier_options, key="kpi_global_supplier")
     if selected_supplier == "未填写港后拖车行":
-        visible_raw = raw.loc[raw["_supplier"].eq("")].copy()
+        visible_raw = region_raw.loc[region_raw["_supplier"].eq("")].copy()
     elif selected_supplier == "全部供应商":
-        visible_raw = raw
+        visible_raw = region_raw
     else:
-        visible_raw = raw.loc[raw["_supplier"].eq(selected_supplier)].copy()
+        visible_raw = region_raw.loc[
+            region_raw["_supplier"].eq(selected_supplier)].copy()
     summary, warnings = summarize(visible_raw)
     st.markdown("### 五项考核指标汇总")
     st.caption("指标值 = 1 −（考核不达标记录数 − 供应商无责记录数）÷ 考核期间总记录数。此处为供应商考核达标率。港后提柜按超LFD天数>0；其余四项按对应时效字段>各 Sheet 的时效标准判定。时效与标准须为相同单位的数值。")
-    st.caption(f"当前供应商：{selected_supplier}｜仅按各 Sheet 的「港后拖车行」字段筛选。")
+    st.caption(f"当前区域：{selected_region}｜当前供应商：{selected_supplier}｜按「目的仓国家=美国」「目的仓物流区域」及「港后拖车行」筛选。")
     st.dataframe(summary, hide_index=True, use_container_width=True)
     for warning in dict.fromkeys(warnings):
         st.warning(warning)
