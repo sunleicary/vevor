@@ -5,6 +5,7 @@ import sqlite3
 from db_backend import connect as db_connect, read_sql, is_neon
 from create_neon_schema import KPI_TABLES
 from kpi_summary import summarize
+import kpi_neon_queries as neon_kpi
 from datetime import datetime, timezone
 from io import BytesIO
 import pandas as pd
@@ -154,73 +155,107 @@ def show_monthly_supplier_entry(df, user):
     selected = st.selectbox("已导入考核月份", batches["month"].tolist(), key="kpi_global_saved_month")
     batch = batches[batches["month"].eq(selected)].iloc[0]
     st.caption(f"来源文件：{batch['source_file']}｜总记录数：{int(batch['row_count']):,}")
-    with connect() as conn:
-        raw = read_sql("""SELECT metric,source_row,payload FROM kpi_raw_rows_v2
-            WHERE month=? AND metric!='台账' ORDER BY metric,source_row""",conn,params=(selected,))
-    # Apply the same rule to records imported before this release.
-    if not raw.empty:
-        mask = raw["metric"].eq("送仓时效")
-        if mask.any():
-            valid = raw.loc[mask, "payload"].map(
-                lambda p: bool(str(json.loads(p).get("排柜单号", "")).strip()))
-            raw = raw.loc[~mask | raw.index.isin(valid.index[valid])].copy()
-    # Scope this dashboard to US records and region by 目的仓物流区域.
-    # Supplier attribution must come exclusively from 港后拖车行.
-    if not raw.empty:
-        raw = raw.copy()
-        payloads = raw["payload"].map(json.loads)
-        raw["_country"] = payloads.map(
-            lambda p: str(p.get("目的仓国家", "") or "").strip().upper())
-        raw["_region"] = payloads.map(
-            lambda p: str(p.get("目的仓物流区域", "") or "").strip())
-        raw["_supplier"] = payloads.map(
-            lambda p: str(p.get("港后拖车行", "") or "").strip())
-        us_names = {"美国", "US", "USA", "AMERICA",
-                    "UNITED STATES", "UNITED STATES OF AMERICA"}
-        raw = raw.loc[raw["_country"].isin(us_names)].copy()
+    if is_neon():
+        # Neon: fetch only distinct filter options and five aggregate rows.
+        # No whole-month JSON payload transfer on filter changes.
+        with connect() as conn:
+            suppliers = neon_kpi.options(conn, selected)
+        supplier_options = ["全部供应商"] + sorted(v for v in suppliers if v)
+        if "" in suppliers:
+            supplier_options.append("未填写港后拖车行")
+        st.markdown("### 考核范围")
+        st.caption("先选择港后拖车供应商，再选择该供应商覆盖的美国区域。默认统计美国全区域。")
+        filter_supplier_col, filter_region_col = st.columns(2, gap="large")
+        with filter_supplier_col:
+            selected_supplier = st.selectbox(
+                "① 港后拖车供应商", supplier_options, key="kpi_global_supplier")
+        supplier_value = (None if selected_supplier == "全部供应商"
+                          else "" if selected_supplier == "未填写港后拖车行"
+                          else selected_supplier)
+        with connect() as conn:
+            regions = neon_kpi.region_options(conn, selected, supplier_value)
+        region_options = ["美国全区域"] + sorted(v for v in regions if v)
+        if "" in regions:
+            region_options.append("未填写区域")
+        region_key = "kpi_global_us_region"
+        if st.session_state.get(region_key) not in region_options:
+            st.session_state[region_key] = "美国全区域"
+        with filter_region_col:
+            selected_region = st.selectbox(
+                "② 美国目的仓物流区域", region_options, key=region_key)
+        region_value = (None if selected_region == "美国全区域"
+                        else "" if selected_region == "未填写区域"
+                        else selected_region)
+        with connect() as conn:
+            summary, warnings = neon_kpi.summary(conn, selected, supplier_value, region_value)
     else:
-        raw = raw.copy()
-        for column in ("_country", "_region", "_supplier"):
-            raw[column] = pd.Series(dtype=str)
+        with connect() as conn:
+            raw = read_sql("""SELECT metric,source_row,payload FROM kpi_raw_rows_v2
+                WHERE month=? AND metric!='台账' ORDER BY metric,source_row""",conn,params=(selected,))
+        # Apply the same rule to records imported before this release.
+        if not raw.empty:
+            mask = raw["metric"].eq("送仓时效")
+            if mask.any():
+                valid = raw.loc[mask, "payload"].map(
+                    lambda p: bool(str(json.loads(p).get("排柜单号", "")).strip()))
+                raw = raw.loc[~mask | raw.index.isin(valid.index[valid])].copy()
+        # Scope this dashboard to US records and region by 目的仓物流区域.
+        # Supplier attribution must come exclusively from 港后拖车行.
+        if not raw.empty:
+            raw = raw.copy()
+            payloads = raw["payload"].map(json.loads)
+            raw["_country"] = payloads.map(
+                lambda p: str(p.get("目的仓国家", "") or "").strip().upper())
+            raw["_region"] = payloads.map(
+                lambda p: str(p.get("目的仓物流区域", "") or "").strip())
+            raw["_supplier"] = payloads.map(
+                lambda p: str(p.get("港后拖车行", "") or "").strip())
+            us_names = {"美国", "US", "USA", "AMERICA",
+                        "UNITED STATES", "UNITED STATES OF AMERICA"}
+            raw = raw.loc[raw["_country"].isin(us_names)].copy()
+        else:
+            raw = raw.copy()
+            for column in ("_country", "_region", "_supplier"):
+                raw[column] = pd.Series(dtype=str)
 
-    st.markdown("### 考核范围")
-    st.caption("先选择港后拖车供应商，再选择该供应商覆盖的美国区域。默认统计美国全区域。")
-    suppliers = sorted(v for v in raw["_supplier"].unique() if v)
-    supplier_options = ["全部供应商"] + suppliers
-    if raw["_supplier"].eq("").any():
-        supplier_options.append("未填写港后拖车行")
+        st.markdown("### 考核范围")
+        st.caption("先选择港后拖车供应商，再选择该供应商覆盖的美国区域。默认统计美国全区域。")
+        suppliers = sorted(v for v in raw["_supplier"].unique() if v)
+        supplier_options = ["全部供应商"] + suppliers
+        if raw["_supplier"].eq("").any():
+            supplier_options.append("未填写港后拖车行")
 
-    filter_supplier_col, filter_region_col = st.columns(2, gap="large")
-    with filter_supplier_col:
-        selected_supplier = st.selectbox(
-            "① 港后拖车供应商", supplier_options, key="kpi_global_supplier")
-    if selected_supplier == "未填写港后拖车行":
-        supplier_raw = raw.loc[raw["_supplier"].eq("")].copy()
-    elif selected_supplier == "全部供应商":
-        supplier_raw = raw
-    else:
-        supplier_raw = raw.loc[raw["_supplier"].eq(selected_supplier)].copy()
+        filter_supplier_col, filter_region_col = st.columns(2, gap="large")
+        with filter_supplier_col:
+            selected_supplier = st.selectbox(
+                "① 港后拖车供应商", supplier_options, key="kpi_global_supplier")
+        if selected_supplier == "未填写港后拖车行":
+            supplier_raw = raw.loc[raw["_supplier"].eq("")].copy()
+        elif selected_supplier == "全部供应商":
+            supplier_raw = raw
+        else:
+            supplier_raw = raw.loc[raw["_supplier"].eq(selected_supplier)].copy()
 
-    region_options = ["美国全区域"] + sorted(
-        v for v in supplier_raw["_region"].unique() if v)
-    if supplier_raw["_region"].eq("").any():
-        region_options.append("未填写区域")
-    # Clear a stale region when changing suppliers, so the widget always has
-    # a valid selection for the newly chosen supplier.
-    region_key = "kpi_global_us_region"
-    if st.session_state.get(region_key) not in region_options:
-        st.session_state[region_key] = "美国全区域"
-    with filter_region_col:
-        selected_region = st.selectbox(
-            "② 美国目的仓物流区域", region_options, key=region_key)
-    if selected_region == "美国全区域":
-        visible_raw = supplier_raw
-    elif selected_region == "未填写区域":
-        visible_raw = supplier_raw.loc[supplier_raw["_region"].eq("")].copy()
-    else:
-        visible_raw = supplier_raw.loc[
-            supplier_raw["_region"].eq(selected_region)].copy()
-    summary, warnings = summarize(visible_raw)
+        region_options = ["美国全区域"] + sorted(
+            v for v in supplier_raw["_region"].unique() if v)
+        if supplier_raw["_region"].eq("").any():
+            region_options.append("未填写区域")
+        # Clear a stale region when changing suppliers, so the widget always has
+        # a valid selection for the newly chosen supplier.
+        region_key = "kpi_global_us_region"
+        if st.session_state.get(region_key) not in region_options:
+            st.session_state[region_key] = "美国全区域"
+        with filter_region_col:
+            selected_region = st.selectbox(
+                "② 美国目的仓物流区域", region_options, key=region_key)
+        if selected_region == "美国全区域":
+            visible_raw = supplier_raw
+        elif selected_region == "未填写区域":
+            visible_raw = supplier_raw.loc[supplier_raw["_region"].eq("")].copy()
+        else:
+            visible_raw = supplier_raw.loc[
+                supplier_raw["_region"].eq(selected_region)].copy()
+        summary, warnings = summarize(visible_raw)
     st.markdown("### 五项考核指标汇总")
     st.caption(f"考核月份：{selected}　｜　供应商：{selected_supplier}　｜　区域：{selected_region}")
     # Top-line operational scorecards: each metric is calculated independently
@@ -248,17 +283,45 @@ def show_monthly_supplier_entry(df, user):
         st.warning(warning)
     st.markdown("### 考核明细核对")
     tabs = st.tabs(SHEETS)
-    for tab, metric in zip(tabs,SHEETS):
+    for tab, metric in zip(tabs, SHEETS):
         with tab:
-            part = visible_raw[visible_raw["metric"].eq(metric)]
-            records = [json.loads(v) for v in part["payload"]]
-            detail = pd.DataFrame(records)
-            detail.insert(0,"序列号",range(1,len(detail)+1))
-            detail.insert(1,"Excel原始行号",part["source_row"].tolist())
-            st.metric("有效明细记录" if metric == "送仓时效" else "全部原始记录",f"{len(detail):,}")
-            st.dataframe(detail,hide_index=True,use_container_width=True,height=540)
-            st.download_button("导出全部明细CSV",
-                detail.to_csv(index=False).encode("utf-8-sig"),
-                file_name=f"{selected}_{metric}_全球全部明细.csv",
-                mime="text/csv",key=f"kpi_global_export_{metric}")
+            if is_neon():
+                page_size = 100
+                page = st.number_input("明细页码", min_value=1, value=1, step=1,
+                                       key=f"kpi_page_{metric}")
+                with connect() as conn:
+                    count, part = neon_kpi.details(
+                        conn, selected, metric, supplier_value, region_value,
+                        limit=page_size, offset=(page - 1) * page_size)
+                records = [json.loads(v) if isinstance(v, str) else v for v in part["payload"]]
+                detail = pd.DataFrame(records)
+                detail.insert(0, "序列号", range((page-1)*page_size+1, (page-1)*page_size+len(detail)+1))
+                detail.insert(1, "Excel原始行号", part["source_row"].tolist())
+                st.caption(f"匹配 {count:,} 条｜当前第 {page} 页｜每页 {page_size} 条")
+                st.dataframe(detail, hide_index=True, use_container_width=True, height=540)
+                if st.button("准备导出当前筛选的全部明细", key=f"kpi_prepare_export_{metric}"):
+                    with connect() as conn:
+                        _, all_rows = neon_kpi.details(
+                            conn, selected, metric, supplier_value, region_value,
+                            limit=count or 1, offset=0)
+                    exported = pd.DataFrame([
+                        json.loads(v) if isinstance(v, str) else v for v in all_rows["payload"]
+                    ])
+                    exported.insert(0, "Excel原始行号", all_rows["source_row"].tolist())
+                    st.download_button(
+                        "下载全部明细 CSV", exported.to_csv(index=False).encode("utf-8-sig"),
+                        file_name=f"{selected}_{metric}_美国筛选明细.csv",
+                        mime="text/csv", key=f"kpi_export_ready_{metric}")
+            else:
+                part = visible_raw[visible_raw["metric"].eq(metric)]
+                records = [json.loads(v) for v in part["payload"]]
+                detail = pd.DataFrame(records)
+                detail.insert(0, "序列号", range(1, len(detail)+1))
+                detail.insert(1, "Excel原始行号", part["source_row"].tolist())
+                st.metric("有效明细记录" if metric == "送仓时效" else "全部原始记录", f"{len(detail):,}")
+                st.dataframe(detail, hide_index=True, use_container_width=True, height=540)
+                st.download_button("导出全部明细CSV",
+                    detail.to_csv(index=False).encode("utf-8-sig"),
+                    file_name=f"{selected}_{metric}_全球全部明细.csv",
+                    mime="text/csv", key=f"kpi_global_export_{metric}")
     st.caption("当前数据后端：" + ("Neon PostgreSQL（云端持久化）" if is_neon() else "SQLite（本地临时存储）"))
