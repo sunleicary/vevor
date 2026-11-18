@@ -10,7 +10,7 @@ from container_detail import show_container_detail
 from supplier_overview import show_supplier_overview
 from kpi_overview import show_kpi_overview
 from monthly_kpi import show_monthly_kpi
-from supplier_kpi_store import show_supplier_kpi
+from monthly_supplier_entry import show_monthly_supplier_entry
 from global_overview import show_global_overview, is_us_country
 from theme import apply_theme
 from auth import login_gate, manage_users, change_own_password
@@ -67,7 +67,7 @@ user = login_gate()
 with st.sidebar:
     st.markdown('<div class="vevor-sidebar-logo">VEVOR®<span>全球港后运营管理</span></div>', unsafe_allow_html=True)
     st.caption(f'当前用户：{user["username"]} · {user["role"]}')
-    pages = ["运营总览", "全球港后运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "港后供应商KPI考核", "月度KPI考核导入", "供应商月度KPI评分与补录"]
+    pages = ["运营总览", "全球港后运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "港后供应商KPI考核"]
     if user["role"] == "管理员":
         pages.append("数据管理")
         pages.append("业务主键质量检查")
@@ -201,12 +201,8 @@ q.loc[lfd.notna() & pickup.notna() & (pickup.dt.normalize() > lfd.dt.normalize()
 q.loc[lfd.notna() & pickup.notna() & (pickup.dt.normalize() <= lfd.dt.normalize()), "风险"] = "已按LFD提箱"
 q["柜号显示"] = q["箱号"].replace("", pd.NA).fillna(q["排柜单号"])
 
-if page == "供应商月度KPI评分与补录":
-    show_supplier_kpi(df, user)
-elif page == "月度KPI考核导入":
-    show_monthly_kpi()
-elif page == "港后供应商KPI考核":
-    show_kpi_overview(df)
+if page == "港后供应商KPI考核":
+    show_monthly_supplier_entry(df, user)
 elif page == "全美港后供应商总览":
     show_supplier_overview(df, grid)
 elif page == "运营总览":
