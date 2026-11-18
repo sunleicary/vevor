@@ -42,7 +42,7 @@ def show_supplier_overview(df, grid):
         st.info("当前 ETA 区间及区域内暂无货柜数据。")
         return
     z["供应商"]=z["港后拖车行"].fillna("").astype(str).str.strip()
-    z.loc[z["供应商"].isin(["","nan","None"]),"供应商"]="待分配/未记录"
+    z.loc[z["供应商"].isin(["", "nan", "None", "港后拖车测试"]), "供应商"] = "待分配/未记录"
     z["月份"]=z["ETA日期_dt"].dt.strftime("%Y-%m")
     total=len(z)
     pending=int(z["供应商"].eq("待分配/未记录").sum())
@@ -58,7 +58,7 @@ def show_supplier_overview(df, grid):
     for col,stat in zip(st.columns(6),stats):
         col.metric(stat[0],stat[1],delta=stat[2] if len(stat)>2 else None,delta_color="off")
     st.caption(f"统计口径：ETA {date_range[0]} — {date_range[1]} · 目的海外仓区域 · 港后拖车行；"
-               "已分配仅指字段有供应商名称，不代表车队确认接单或运力。")
+               "“港后拖车测试”归入待分配/未记录；已分配仅指有效供应商名称，不代表车队确认接单或运力。")
 
     st.markdown('<div class="supplier-section">📊 区域需求 · 月度趋势 · 供应商结构</div>',unsafe_allow_html=True)
     left,mid,right=st.columns([1,1.25,1],gap="medium")
@@ -169,5 +169,5 @@ def show_supplier_overview(df, grid):
     if vendor!="全部": subset=subset[subset["供应商"].eq(vendor)]
     st.caption(f"匹配 {len(subset):,} 条货柜记录；可在下表查看和导出。")
     grid(subset,key="supplier_overview_detail")
-    st.caption("说明：参考图中的‘测试/待分配’与‘分配率’属于历史展示口径；本页仅依据当前数据的港后拖车行是否填写判断，"
+    st.caption("说明：本页将港后拖车行为空或为“港后拖车测试”的记录归为“待分配/未记录”，"
                "无法识别供应商是否已确认产能。月度数据按 ETA 月份归属，不代表实际提柜月份。")
