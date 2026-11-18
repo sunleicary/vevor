@@ -166,7 +166,7 @@ def show_monthly_supplier_entry(df, user):
             raw = raw.loc[~mask | raw.index.isin(valid.index[valid])].copy()
     summary, warnings = summarize(raw)
     st.markdown("### 五项考核指标汇总")
-    st.caption("指标值 =（考核不达标记录数 − 供应商无责记录数）÷ 考核期间总记录数。此处为供应商有责不达标占比，并非达标率。港后提柜按超LFD天数>0；其余四项按对应时效字段>标准时效判定。时效与标准须为相同单位的数值。")
+    st.caption("指标值 = 1 −（考核不达标记录数 − 供应商无责记录数）÷ 考核期间总记录数。此处为供应商考核达标率。港后提柜按超LFD天数>0；其余四项按对应时效字段>标准时效判定。时效与标准须为相同单位的数值。")
     st.dataframe(summary, hide_index=True, use_container_width=True)
     for warning in dict.fromkeys(warnings):
         st.warning(warning)
