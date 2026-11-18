@@ -173,10 +173,7 @@ def show_monthly_supplier_entry(df, user):
                           else "" if selected_supplier == "未填写港后拖车行"
                           else selected_supplier)
         with connect() as conn:
-            regions = neon_kpi.options(conn, selected, supplier_value) if supplier_value is not None else neon_kpi.options(conn, selected, supplier="")
-            # supplier=None means all suppliers; the special "" is an exact blank supplier.
-            if selected_supplier == "全部供应商":
-                regions = neon_kpi.all_regions(conn, selected)
+            regions = neon_kpi.region_options(conn, selected, supplier_value)
         region_options = ["美国全区域"] + sorted(v for v in regions if v)
         if "" in regions:
             region_options.append("未填写区域")
