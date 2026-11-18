@@ -183,39 +183,70 @@ def show_monthly_supplier_entry(df, user):
         for column in ("_country", "_region", "_supplier"):
             raw[column] = pd.Series(dtype=str)
 
-    region_options = ["美国全区域"] + sorted(
-        v for v in raw["_region"].unique() if v)
-    if raw["_region"].eq("").any():
-        region_options.append("未填写区域")
-    selected_region = st.selectbox(
-        "美国目的仓物流区域", region_options, key="kpi_global_us_region")
-    if selected_region == "美国全区域":
-        region_raw = raw
-    elif selected_region == "未填写区域":
-        region_raw = raw.loc[raw["_region"].eq("")].copy()
-    else:
-        region_raw = raw.loc[raw["_region"].eq(selected_region)].copy()
-
-    suppliers = sorted(v for v in region_raw["_supplier"].unique() if v)
+    st.markdown("### 考核范围")
+    st.caption("先选择港后拖车供应商，再选择该供应商覆盖的美国区域。默认统计美国全区域。")
+    suppliers = sorted(v for v in raw["_supplier"].unique() if v)
     supplier_options = ["全部供应商"] + suppliers
-    if region_raw["_supplier"].eq("").any():
+    if raw["_supplier"].eq("").any():
         supplier_options.append("未填写港后拖车行")
-    selected_supplier = st.selectbox(
-        "港后拖车供应商", supplier_options, key="kpi_global_supplier")
+
+    filter_supplier_col, filter_region_col = st.columns(2, gap="large")
+    with filter_supplier_col:
+        selected_supplier = st.selectbox(
+            "① 港后拖车供应商", supplier_options, key="kpi_global_supplier")
     if selected_supplier == "未填写港后拖车行":
-        visible_raw = region_raw.loc[region_raw["_supplier"].eq("")].copy()
+        supplier_raw = raw.loc[raw["_supplier"].eq("")].copy()
     elif selected_supplier == "全部供应商":
-        visible_raw = region_raw
+        supplier_raw = raw
     else:
-        visible_raw = region_raw.loc[
-            region_raw["_supplier"].eq(selected_supplier)].copy()
+        supplier_raw = raw.loc[raw["_supplier"].eq(selected_supplier)].copy()
+
+    region_options = ["美国全区域"] + sorted(
+        v for v in supplier_raw["_region"].unique() if v)
+    if supplier_raw["_region"].eq("").any():
+        region_options.append("未填写区域")
+    # Clear a stale region when changing suppliers, so the widget always has
+    # a valid selection for the newly chosen supplier.
+    region_key = "kpi_global_us_region"
+    if st.session_state.get(region_key) not in region_options:
+        st.session_state[region_key] = "美国全区域"
+    with filter_region_col:
+        selected_region = st.selectbox(
+            "② 美国目的仓物流区域", region_options, key=region_key)
+    if selected_region == "美国全区域":
+        visible_raw = supplier_raw
+    elif selected_region == "未填写区域":
+        visible_raw = supplier_raw.loc[supplier_raw["_region"].eq("")].copy()
+    else:
+        visible_raw = supplier_raw.loc[
+            supplier_raw["_region"].eq(selected_region)].copy()
     summary, warnings = summarize(visible_raw)
     st.markdown("### 五项考核指标汇总")
-    st.caption("指标值 = 1 −（考核不达标记录数 − 供应商无责记录数）÷ 考核期间总记录数。此处为供应商考核达标率。港后提柜按超LFD天数>0；其余四项按对应时效字段>各 Sheet 的时效标准判定。时效与标准须为相同单位的数值。")
-    st.caption(f"当前区域：{selected_region}｜当前供应商：{selected_supplier}｜按「目的仓国家=美国」「目的仓物流区域」及「港后拖车行」筛选。")
-    st.dataframe(summary, hide_index=True, use_container_width=True)
+    st.caption(f"考核月份：{selected}　｜　供应商：{selected_supplier}　｜　区域：{selected_region}")
+    # Top-line operational scorecards: each metric is calculated independently
+    # from the same supplier/region-filtered rows as the detailed summary.
+    metric_cols = st.columns(5, gap="small")
+    for col, row in zip(metric_cols, summary.to_dict("records")):
+        with col:
+            with st.container(border=True):
+                st.caption(row["指标"])
+                st.metric("达标率", row["指标值"])
+                st.caption(f'考核 {row["考核期间总记录数"]:,} 条 · 不达标 {row["考核不达标记录数"]:,} 条')
+    st.dataframe(
+        summary, hide_index=True, use_container_width=True,
+        column_config={
+            "指标": st.column_config.TextColumn("指标", width="medium"),
+            "考核期间总记录数": st.column_config.NumberColumn("考核期间总记录数", format="%d"),
+            "考核不达标记录数": st.column_config.NumberColumn("考核不达标记录数", format="%d"),
+            "供应商无责记录数": st.column_config.NumberColumn("供应商无责记录数", format="%d"),
+            "指标值": st.column_config.TextColumn("指标值（达标率）", width="medium"),
+        })
+    with st.expander("查看考核规则与计算公式"):
+        st.markdown("**达标率 = 1 −（不达标记录数 − 供应商无责记录数）÷ 考核期间总记录数**")
+        st.caption("港后提柜：超LFD天数 > 0；送仓准时率：送仓时效 > 时效标准；其他时效指标按各自实际时效与标准时效比较。供应商无责仅计入不达标且运营判责为「车队无责」的记录。")
     for warning in dict.fromkeys(warnings):
         st.warning(warning)
+    st.markdown("### 考核明细核对")
     tabs = st.tabs(SHEETS)
     for tab, metric in zip(tabs,SHEETS):
         with tab:
