@@ -142,7 +142,7 @@ def show_global_overview(df):
                            "ETA日期", "LFD", "进口实际提箱时间", "LFD状态"]
             st.dataframe(risk[[v for v in risk_fields if v in risk.columns]],
                          hide_index=True, use_container_width=True, height=330)
-        st.markdown("#### 📋 国家业务量与供应商分配")
+    st.markdown("#### 📋 国家业务量与供应商分配")
     summary = z.groupby("国家").size().rename("总柜量").to_frame()
     pending_by_country = z[z["港后供应商"].eq("待分配/未记录")].groupby("国家").size()
     summary["待分配/未记录"] = pending_by_country.reindex(summary.index, fill_value=0)
