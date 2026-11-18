@@ -176,7 +176,7 @@ def migrate(apply):
         with pg.transaction():
             pg.execute("SELECT pg_advisory_xact_lock(2026111801)")
             for table in ALL_TABLES:
-                exists = pg.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0]
+                exists = pg.execute("SELECT to_regclass(%s::text)", (table,)).fetchone()[0]
                 if exists is None:
                     raise RuntimeError(f"Missing Neon target table: {table}. Run create_neon_schema.py")
                 count = pg.execute(
@@ -209,7 +209,11 @@ if __name__ == "__main__":
         migrate(args.apply)
     except Exception as exc:
         # Don't print full backend exceptions; may contain the secret DSN.
-        print(f"FAILED ({type(exc).__name__}): migration did not complete. "
-              "Check source structure and target counts.",file=sys.stderr)
+        safe_detail = str(exc).split("\\n")[0][:350]
+        # The connection URL is secret; never echo it even if a driver includes it.
+        url = os.environ.get("DATABASE_URL", "")
+        if url:
+            safe_detail = safe_detail.replace(url, "[REDACTED]")
+        print(f"FAILED ({type(exc).__name__}): {safe_detail}",file=sys.stderr)
         print("Database changes, if any, have been rolled back.",file=sys.stderr)
         sys.exit(1)
