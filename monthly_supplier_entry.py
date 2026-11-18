@@ -285,43 +285,26 @@ def show_monthly_supplier_entry(df, user):
     tabs = st.tabs(SHEETS)
     for tab, metric in zip(tabs, SHEETS):
         with tab:
-            # The five-row summary already has an exact count for each metric.
             total = int(summary.loc[
                 summary["指标"].eq(metric), "考核期间总记录数"].iloc[0])
-            page_size = 100
-            pages = max(1, (total + page_size - 1) // page_size)
-            page_key = f"kpi_page_{metric}"
-            # A filter change may reduce page count; clamp before widget creation.
-            if st.session_state.get(page_key, 1) > pages:
-                st.session_state[page_key] = 1
-            page = st.number_input(
-                "明细页码", min_value=1, max_value=pages, value=1, step=1,
-                key=page_key, disabled=pages == 1)
-            offset = (page - 1) * page_size
             if is_neon():
+                # Retrieve only the selected month/supplier/region/metric,
+                # but return every matching detail row without pagination.
                 with connect() as conn:
-                    part = neon_kpi.detail_page(
-                        conn, selected, metric, supplier_value, region_value,
-                        limit=page_size, offset=offset)
-                records = [json.loads(v) if isinstance(v, str) else v
-                           for v in part["payload"]]
+                    part = neon_kpi.all_details(
+                        conn, selected, metric, supplier_value, region_value)
             else:
-                # SQLite fallback retains the existing in-memory monthly dataset,
-                # but renders and exports at most 100 rows per page.
-                part = visible_raw[visible_raw["metric"].eq(metric)].iloc[
-                    offset:offset + page_size]
-                records = [json.loads(v) if isinstance(v, str) else v
-                           for v in part["payload"]]
+                part = visible_raw[visible_raw["metric"].eq(metric)]
+            records = [json.loads(v) if isinstance(v, str) else v
+                       for v in part["payload"]]
             detail = pd.DataFrame(records)
-            detail.insert(0, "序列号", range(offset + 1, offset + len(detail) + 1))
+            detail.insert(0, "序列号", range(1, len(detail) + 1))
             detail.insert(1, "Excel原始行号", part["source_row"].tolist())
-            st.caption(
-                f"匹配 {total:,} 条｜第 {page} / {pages} 页｜"
-                f"显示 {len(detail)} 条（最多 100 条）")
+            st.caption(f"匹配 {total:,} 条｜显示全部 {len(detail):,} 条")
             st.dataframe(detail, hide_index=True, use_container_width=True, height=540)
             st.download_button(
-                "导出当前页 CSV（最多100条）",
+                "导出全部明细 CSV",
                 detail.to_csv(index=False).encode("utf-8-sig"),
-                file_name=f"{selected}_{metric}_第{page}页.csv",
+                file_name=f"{selected}_{metric}_美国筛选全部明细.csv",
                 mime="text/csv", key=f"kpi_global_export_{metric}")
     st.caption("当前数据后端：" + ("Neon PostgreSQL（云端持久化）" if is_neon() else "SQLite（本地临时存储）"))
