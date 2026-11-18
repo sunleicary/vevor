@@ -10,7 +10,8 @@ import pandas as pd
 import streamlit as st
 
 DB = os.environ.get("KPI_DB_PATH", os.path.join(os.path.dirname(__file__), "supplier_kpi.db"))
-SHEETS = ["港后提柜及时率", "送仓准时率", "送仓时效", "提空及时率", "还柜及时率", "台账"]
+SHEETS = ["港后提柜及时率", "送仓准时率", "送仓时效", "提空及时率", "还柜及时率"]
+IMPORT_SHEETS = SHEETS + ["台账"]
 
 def connect():
     conn = db_connect(DB, timeout=60)
@@ -56,7 +57,9 @@ def parse_workbook(payload, month):
         raise ValueError("缺少工作表：" + "、".join(missing))
     rows = []
     counts = {}
-    for sheet in SHEETS:
+    for sheet in IMPORT_SHEETS:
+        if sheet not in book.sheetnames:
+            continue
         ws = book[sheet]
         header_row = 1 if sheet == "台账" else 2
         headers = next(ws.iter_rows(min_row=header_row, max_row=header_row, values_only=True))
@@ -88,7 +91,7 @@ def parse_workbook(payload, month):
 
 def show_monthly_supplier_entry(df, user):
     st.title("港后供应商 KPI 考核｜全球原始数据核对")
-    st.caption("统一导入五项 KPI 与台账全球明细；送仓时效排除排柜单号为空的记录。台账分页展示，避免一次加载全部记录。")
+    st.caption("仅展示五项供应商考核指标；如工作簿包含台账，导入时仍保留其原始数据。送仓时效排除排柜单号为空的记录。")
     try:
         with connect() as conn:
             batches = read_sql("SELECT * FROM kpi_batches_v2 ORDER BY month DESC", conn)
@@ -138,7 +141,7 @@ def show_monthly_supplier_entry(df, user):
                                     VALUES (?,?,?,?,?::jsonb,?,?)""", subset)
                         conn.commit()
                     st.success(f"已保存 {len(rows):,} 条原始明细。")
-                    st.dataframe(pd.DataFrame([{"指标":k,"导入记录数":v} for k,v in counts.items()]),
+                    st.dataframe(pd.DataFrame([{"指标":k,"导入记录数":counts.get(k,0)} for k in SHEETS]),
                                  hide_index=True,use_container_width=True)
                     st.rerun()
                 except Exception as exc:
@@ -151,7 +154,7 @@ def show_monthly_supplier_entry(df, user):
     batch = batches[batches["month"].eq(selected)].iloc[0]
     st.caption(f"来源文件：{batch['source_file']}｜总记录数：{int(batch['row_count']):,}")
     with connect() as conn:
-        raw = pd.read_sql_query("""SELECT metric,source_row,payload FROM kpi_raw_rows_v2
+        raw = read_sql("""SELECT metric,source_row,payload FROM kpi_raw_rows_v2
             WHERE month=? AND metric!='台账' ORDER BY metric,source_row""",conn,params=(selected,))
     # Apply the same rule to records imported before this release.
     if not raw.empty:
@@ -161,40 +164,11 @@ def show_monthly_supplier_entry(df, user):
                 lambda p: bool(str(json.loads(p).get("排柜单号", "")).strip()))
             raw = raw.loc[~mask | raw.index.isin(valid.index[valid])].copy()
     counts = raw.groupby("metric").size().reindex(SHEETS, fill_value=0)
-    with connect() as conn:
-        counts.loc["台账"] = conn.execute(
-            "SELECT COUNT(*) FROM kpi_raw_rows_v2 WHERE month=? AND metric='台账'",
-            (selected,)).fetchone()[0]
     st.dataframe(pd.DataFrame({"指标":SHEETS,"已保存记录数":counts.values}),
                  hide_index=True,use_container_width=True)
     tabs = st.tabs(SHEETS)
     for tab, metric in zip(tabs,SHEETS):
         with tab:
-            if metric == "台账":
-                total = int(counts.loc["台账"])
-                st.metric("台账记录数", f"{total:,}")
-                if not total:
-                    st.info("当前月份尚未导入台账，请重新上传包含台账的 KPI 工作簿。")
-                    continue
-                page_size = 200
-                page_count = (total + page_size - 1) // page_size
-                page_no = st.number_input("台账页码", min_value=1, max_value=page_count,
-                                          value=1, step=1, key=f"ledger_page_{selected}")
-                with connect() as conn:
-                    ledger_rows = conn.execute(
-                        "SELECT source_row,payload FROM kpi_raw_rows_v2 "
-                        "WHERE month=? AND metric='台账' ORDER BY source_row LIMIT ? OFFSET ?",
-                        (selected, page_size, (int(page_no)-1)*page_size)).fetchall()
-                detail = pd.DataFrame([json.loads(item[1]) for item in ledger_rows])
-                detail.insert(0, "序列号", range((int(page_no)-1)*page_size+1,
-                                               (int(page_no)-1)*page_size+1+len(detail)))
-                detail.insert(1, "Excel原始行号", [item[0] for item in ledger_rows])
-                st.caption(f"每页 {page_size} 条，共 {page_count} 页；保留台账全部原始记录。")
-                st.dataframe(detail, hide_index=True, use_container_width=True, height=540)
-                st.download_button("导出当前页 CSV", detail.to_csv(index=False).encode("utf-8-sig"),
-                                   file_name=f"{selected}_台账_第{page_no}页.csv",
-                                   mime="text/csv", key="kpi_ledger_page_export")
-                continue
             part = raw[raw["metric"].eq(metric)]
             records = [json.loads(v) for v in part["payload"]]
             detail = pd.DataFrame(records)
