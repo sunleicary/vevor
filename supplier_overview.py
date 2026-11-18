@@ -57,7 +57,7 @@ def show_supplier_overview(df, grid):
            ("覆盖区域",f"{z['区域'].nunique()} 个")]
     for col,stat in zip(st.columns(6),stats):
         col.metric(stat[0],stat[1],delta=stat[2] if len(stat)>2 else None,delta_color="off")
-    st.caption(f"统计口径：ETA {date_range[0]} — {date_range[1]} · 目的海外仓区域 · 港后拖车行；"
+    st.caption(f"统计口径：ETA {date_range[0]} — {date_range[1]} · 排柜单号唯一业务记录 · 目的海外仓区域 · 港后拖车行；"
                "“港后拖车测试”归入待分配/未记录；已分配仅指有效供应商名称，不代表车队确认接单或运力。")
 
     st.markdown('<div class="supplier-section">📊 区域需求 · 月度趋势 · 供应商结构</div>',unsafe_allow_html=True)
