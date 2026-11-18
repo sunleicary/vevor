@@ -175,3 +175,11 @@ def detail_page(conn, month, metric, supplier=None, region=None, limit=100, offs
     return read_sql(f"""SELECT source_row, payload FROM kpi_raw_rows_v2
         WHERE {where} ORDER BY source_row LIMIT ? OFFSET ?""",
         conn, params=arguments + (min(max(int(limit), 1), 100), max(int(offset), 0)))
+
+def all_details(conn, month, metric, supplier=None, region=None):
+    """Return every detail row matching the selected US KPI filters."""
+    suffix, extra = filters(supplier, region)
+    where = f"{BASE} {suffix} AND metric=?"
+    arguments = params(month) + tuple(extra) + (metric,)
+    return read_sql(f"""SELECT source_row, payload FROM kpi_raw_rows_v2
+        WHERE {where} ORDER BY source_row""", conn, params=arguments)
