@@ -1,32 +1,34 @@
 """Five-column KPI summary calculated from imported workbook payloads.
 
-Metric value is the user-specified attributable failure ratio, not pass rate.
+Metric value is the user-specified attributable failure ratio, not pass rate.\nDurations and standards must be numeric and expressed in matching units.
 """
 import json
 import math
 import pandas as pd
 
 METRICS = ("港后提柜及时率", "送仓准时率", "送仓时效", "提空及时率", "还柜及时率")
-STATUS = {
-    "送仓准时率": ("是否准时", {"不准时"}, {"准时"}),
-    "送仓时效": ("是否超时", {"是", "超时"}, {"否", "未超时"}),
-    "提空及时率": ("是否超时", {"是", "超时"}, {"否", "未超时"}),
-    "还柜及时率": ("是否超时", {"是", "超时"}, {"否", "未超时"}),
+DURATION_FIELDS = {
+    "送仓准时率": "送仓时效",
+    "送仓时效": "送仓时效",
+    "提空及时率": "提空时效",
+    "还柜及时率": "还柜时效",
 }
+STANDARD_FIELD = "标准时效"
 EXEMPT = "车队无责"
 
 def _clean(value):
     return str(value if value is not None else "").strip()
 
-def _positive_number(value):
+def _number(value):
     raw = _clean(value).replace(",", "")
     if not raw:
         return None
     try:
         number = float(raw)
-        return number > 0 if math.isfinite(number) else None
+        return number if math.isfinite(number) else None
     except (TypeError, ValueError):
         return None
+
 
 def summarize(raw):
     summary, warnings = [], []
@@ -43,27 +45,19 @@ def summarize(raw):
         unknown = 0
         for record in records:
             if metric == "港后提柜及时率":
-                field = "超LFD天数"
-                if field not in record:
+                days = _number(record.get("超LFD天数"))
+                if days is None:
                     unknown += 1
                     continue
-                is_failed = _positive_number(record[field])
-                if is_failed is None:
-                    unknown += 1
-                    continue
+                is_failed = days > 0
             else:
-                field, fail_values, pass_values = STATUS[metric]
-                if field not in record:
+                actual_field = DURATION_FIELDS[metric]
+                actual = _number(record.get(actual_field))
+                standard = _number(record.get(STANDARD_FIELD))
+                if actual is None or standard is None:
                     unknown += 1
                     continue
-                value = _clean(record[field])
-                if value in fail_values:
-                    is_failed = True
-                elif value in pass_values:
-                    is_failed = False
-                else:
-                    unknown += 1
-                    continue
+                is_failed = actual > standard
             if is_failed:
                 failed += 1
                 if _clean(record.get("运营判责")) == EXEMPT:
