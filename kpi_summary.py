@@ -53,7 +53,8 @@ def summarize(raw):
             else:
                 actual_field = DURATION_FIELDS[metric]
                 actual = _number(record.get(actual_field))
-                standard = _number(record.get(STANDARD_FIELD))
+                standard_field = "时效标准" if metric == "送仓准时率" else STANDARD_FIELD
+                standard = _number(record.get(standard_field))
                 if actual is None or standard is None:
                     unknown += 1
                     continue
