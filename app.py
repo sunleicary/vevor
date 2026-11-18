@@ -8,6 +8,7 @@ import streamlit as st
 from import_data import DB, load
 from container_detail import show_container_detail
 from supplier_overview import show_supplier_overview
+from global_overview import show_global_overview, is_us_country
 from theme import apply_theme
 from auth import login_gate, manage_users, change_own_password
 
@@ -63,7 +64,7 @@ user = login_gate()
 with st.sidebar:
     st.markdown('<div class="vevor-sidebar-logo">VEVOR®<span>美国港后运营管理</span></div>', unsafe_allow_html=True)
     st.caption(f'当前用户：{user["username"]} · {user["role"]}')
-    pages = ["运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析"]
+    pages = ["运营总览", "全球港后业务量分析", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析"]
     if user["role"] == "管理员":
         pages.append("数据管理")
     if user["role"] == "管理员":
@@ -120,6 +121,13 @@ df = read_db(os.path.getmtime(DB))
 df["区域"] = df["目的仓物流区域"].fillna("").map(region)
 for col in ["ETA日期", "ATA日期", "LFD", "进口实际提箱时间", "实际送仓时间", "实际还柜日期"]:
     df[col + "_dt"] = pd.to_datetime(df[col], errors="coerce", format="mixed")
+if page == "全球港后业务量分析":
+    show_global_overview(df)
+    st.stop()
+
+# Existing US operations pages must not include newly imported non-US records.
+df = df[df["目的仓国家"].map(is_us_country)].copy()
+
 with st.sidebar:
     regions = sorted(df["区域"].unique())
     selected = st.multiselect("运营区域", regions, default=regions)
