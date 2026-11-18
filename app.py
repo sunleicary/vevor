@@ -272,7 +272,7 @@ elif page == "运营总览":
                         if carrier != "全部":
                             st.caption("当前已筛选单个拖车商；选择左侧「全部」查看完整供应商占比。")
             if not z.empty:
-                with st.expander("🔎 区域柜量及港后拖车商占比 · 条件查询"):
+                with st.expander("🔎 区域柜量及港后拖车商占比 · 条件查询", expanded=True):
                     st.caption("在当前 ETA、区域和拖车商全局筛选范围内进一步查询；占比以所选区域的全部货柜为分母。")
                     query_data = z[["区域", "港后拖车行"]].copy()
                     query_data["港后拖车商"] = query_data["港后拖车行"].fillna("").astype(str).str.strip()
