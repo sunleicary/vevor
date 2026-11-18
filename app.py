@@ -8,6 +8,7 @@ import streamlit as st
 from import_data import DB, load
 from container_detail import show_container_detail
 from supplier_overview import show_supplier_overview
+from kpi_overview import show_kpi_overview
 from global_overview import show_global_overview, is_us_country
 from theme import apply_theme
 from auth import login_gate, manage_users, change_own_password
@@ -64,7 +65,7 @@ user = login_gate()
 with st.sidebar:
     st.markdown('<div class="vevor-sidebar-logo">VEVOR®<span>全球港后运营管理</span></div>', unsafe_allow_html=True)
     st.caption(f'当前用户：{user["username"]} · {user["role"]}')
-    pages = ["运营总览", "全球港后运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析"]
+    pages = ["运营总览", "全球港后运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "港后供应商KPI考核"]
     if user["role"] == "管理员":
         pages.append("数据管理")
         pages.append("业务主键质量检查")
@@ -198,7 +199,9 @@ q.loc[lfd.notna() & pickup.notna() & (pickup.dt.normalize() > lfd.dt.normalize()
 q.loc[lfd.notna() & pickup.notna() & (pickup.dt.normalize() <= lfd.dt.normalize()), "风险"] = "已按LFD提箱"
 q["柜号显示"] = q["箱号"].replace("", pd.NA).fillna(q["排柜单号"])
 
-if page == "全美港后供应商总览":
+if page == "港后供应商KPI考核":
+    show_kpi_overview(df)
+elf page == "全美港后供应商总览":
     show_supplier_overview(df, grid)
 elif page == "运营总览":
     names = [None, "新泽西 NJ", "萨凡纳 SAV", "洛杉矶 LA/LB", "休斯顿 HOU", "芝加哥 CHI", "亚特兰大 ATL"]
