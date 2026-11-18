@@ -32,7 +32,7 @@ def load(path):
             if len(cells) == len(cols):
                 values = ["".join(c.itertext()).strip() for c in cells]
                 row = dict(zip(cols, values))
-                if row.get("目的仓国家", "").upper() in ("AMERICA","USA","UNITED STATES","美国","US"):
+                if any(row.get(f, "").strip() for f in ("箱号", "排柜单号")):
                     batch.append(tuple(row.get(f, "") for f in FIELDS))
                     count += 1
             if len(batch) >= 500:
@@ -46,14 +46,14 @@ def load(path):
         conn.execute('CREATE INDEX idx_region ON containers("目的仓物流区域")')
         conn.commit()
         if not count:
-            raise ValueError("未发现美国目的仓记录，请检查源文件格式及字段")
+            raise ValueError("未发现有效货柜记录，请检查源文件格式及字段")
     except Exception:
         conn.close()
         os.remove(temp_db)
         raise
     conn.close()
     os.replace(temp_db, DB)
-    print("Imported US records:", count)
+    print("Imported global records:", count)
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
