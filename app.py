@@ -202,7 +202,7 @@ q["柜号显示"] = q["箱号"].replace("", pd.NA).fillna(q["排柜单号"])
 
 if page == "月度KPI考核导入":
     show_monthly_kpi()
-elf page == "港后供应商KPI考核":
+elif page == "港后供应商KPI考核":
     show_kpi_overview(df)
 elif page == "全美港后供应商总览":
     show_supplier_overview(df, grid)
