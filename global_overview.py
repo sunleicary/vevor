@@ -89,116 +89,131 @@ def _details(z, key):
 
 
 def show_global_overview(df):
-    st.markdown("""<div style="background:linear-gradient(110deg,#092452,#0b4d94 75%,#ef5b20);
-        padding:20px 26px;border-radius:12px;color:white;margin-bottom:12px">
-        <h2 style="margin:0;color:white">🌍 全球港后运营总览</h2>
-        <div style="color:#dbeaff;margin-top:5px">国家 → 目的仓物流区域 → 货柜处理进度 · Global Post-Port Operations</div>
-        </div>""", unsafe_allow_html=True)
-    needed = {"目的仓国家", "目的仓物流区域", "港后拖车行"}
-    if not needed.issubset(df.columns):
-        st.error("数据库缺少必要字段：" + "、".join(sorted(needed - set(df.columns))))
+    st.markdown("""<div style="background:linear-gradient(105deg,#092653,#134a88 80%,#ef5b20);
+      border-radius:12px;padding:17px 24px;margin-bottom:12px;color:white">
+      <div style="font-size:1.5rem;font-weight:750">🌍 全球港后运营总览</div>
+      <div style="color:#dbe8fa;font-size:.9rem;margin-top:4px">
+      国家管理 / 区域处理进度 / 港后供应商 / 异常预警</div></div>""", unsafe_allow_html=True)
+    required = {"目的仓国家", "目的仓物流区域", "港后拖车行"}
+    if not required.issubset(df.columns):
+        st.error("缺少必要字段：" + "、".join(sorted(required - set(df.columns))))
         return
-    z = _prepare(df)
-    valid = z["ETA日期_dt"].dropna()
+    data = _prepare(df)
+    valid = data["ETA日期_dt"].dropna()
     years = sorted(valid.dt.year.unique().astype(int).tolist(), reverse=True)
-    c1, c2, c3 = st.columns([1.2, 1.6, 2])
-    with c1:
-        mode = st.radio("统计范围", ["全部历史记录", "按ETA日期"], key="global_mode")
-    with c2:
+    f1, f2, f3 = st.columns([1, 1.5, 1.5])
+    with f1:
+        mode = st.selectbox("数据时间口径", ["全部历史记录", "按ETA日期"], key="global_mode")
+    with f2:
         if mode == "按ETA日期" and years:
             yr = st.selectbox("ETA年份", years, index=years.index(2026) if 2026 in years else 0, key="global_year")
-            dates = st.date_input("ETA日期范围", (date(yr, 1, 1), date(yr, 12, 31)), key=f"global_dates_{yr}")
+        else:
+            yr = None
+            st.caption("历史模式包括没有 ETA 的记录")
+    with f3:
+        if yr is not None:
+            dates = st.date_input("ETA日期区间", (date(yr, 1, 1), date(yr, 12, 31)),
+                                  key=f"global_dates_{yr}")
         else:
             dates = None
-            st.caption("全部历史记录包含缺少 ETA 的货柜")
-    with c3:
-        country_options = sorted(z["国家"].unique().tolist())
-        selected_countries = st.multiselect("国家筛选", country_options, default=country_options,
-                                            key="global_countries")
-    z = z[z["国家"].isin(selected_countries)].copy()
     if mode == "按ETA日期":
         if not years:
-            st.warning("当前没有有效 ETA 日期，请切换到全部历史记录。")
+            st.warning("无有效 ETA 日期，请使用全部历史记录模式。")
             return
-        if len(dates) != 2:
-            st.info("请选择完整 ETA 起止日期。")
+        if not dates or len(dates) != 2:
+            st.info("请选择完整的 ETA 起止日期。")
             return
-        z = z[z["ETA日期_dt"].between(pd.Timestamp(dates[0]),
-              pd.Timestamp(dates[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1))]
-    if z.empty:
-        st.info("当前筛选范围内没有货柜记录。")
+        data = data[data["ETA日期_dt"].between(pd.Timestamp(dates[0]),
+            pd.Timestamp(dates[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1))].copy()
+    if data.empty:
+        st.info("当前时间窗口内无货柜记录。")
         return
-
+    countries = _summary(data, "国家")
+    names = countries["国家"].tolist()
+    country = st.selectbox("🌐 国家运营中心", ["全球全部"] + names, key="global_selected_country")
+    z = data if country == "全球全部" else data[data["国家"].eq(country)]
     total = len(z)
-    kpis = [("总柜量", total), ("覆盖国家", z["国家"].nunique()),
-            ("覆盖区域", z[["国家", "区域"]].drop_duplicates().shape[0]),
-            ("已到港", int(z["已到港"].sum())),
-            ("已提柜", int(z["已提柜"].sum())),
-            ("已送仓", int(z["已送仓"].sum())),
-            ("已还空", int(z["已还空"].sum())),
-            ("LFD超期待核实", int(z["LFD超期待核实"].sum()))]
-    for col, (label, count) in zip(st.columns(8), kpis):
-        col.metric(label, f"{count:,}")
-    st.caption("统计单位为原始货柜记录（非去重箱号）。运营节点按对应日期字段是否有记录计算；"
-               "“待处理”表示系统尚无下一节点记录，不代表现场实际未完成。")
+    kpis = [("总柜量", total), ("区域数", len(z[["国家", "区域"]].drop_duplicates())),
+            ("已到港", int(z["已到港"].sum())), ("已提柜", int(z["已提柜"].sum())),
+            ("已送仓", int(z["已送仓"].sum())), ("已还空", int(z["已还空"].sum())),
+            ("待分配", int(z["待分配"].sum())), ("LFD超期待核实", int(z["LFD超期待核实"].sum()))]
+    for col, (label, value) in zip(st.columns(8), kpis):
+        with col:
+            st.caption(label)
+            st.markdown(f"<div style='font-size:1.45rem;font-weight:750;color:#123765'>{value:,}</div>",
+                        unsafe_allow_html=True)
+    st.caption("柜量为原始记录行数，不按箱号去重。处理节点基于原始日期字段；"
+               "无记录不等于现场未完成。区域使用「目的仓物流区域」原始值，不推断归属。")
 
-    st.markdown("#### ① 国家级货柜处理进度")
-    by_country = _summary(z, "国家")
-    st.dataframe(by_country, hide_index=True, use_container_width=True,
-                 column_config={"送仓率%": st.column_config.ProgressColumn("送仓率%", min_value=0, max_value=100, format="%.1f%%"),
-                                "还空率%": st.column_config.ProgressColumn("还空率%", min_value=0, max_value=100, format="%.1f%%")})
-    _download(by_country, "全球国家港后处理进度.csv", "global_country_status_export")
-
-    left, right = st.columns(2, gap="large")
-    with left:
-        st.markdown("##### 各国家货柜量")
-        st.bar_chart(by_country.set_index("国家")["总柜量"].sort_values(),
-                     horizontal=True, height=max(300, min(600, 34 * len(by_country))))
-    with right:
-        st.markdown("##### 各国家送仓与还空进度")
-        st.bar_chart(by_country.set_index("国家")[["已送仓", "已还空"]],
-                     horizontal=True, height=max(300, min(600, 34 * len(by_country))))
-
-    st.markdown("#### ② 国家 → 区域处理情况")
-    country = st.selectbox("选择国家，查看该国全部运营区域", ["全部国家"] + by_country["国家"].tolist(),
-                           key="global_focus_country")
-    scope = z if country == "全部国家" else z[z["国家"].eq(country)]
-    by_region = _summary(scope, ["国家", "区域"])
-    st.dataframe(by_region, hide_index=True, use_container_width=True,
-                 column_config={"送仓率%": st.column_config.ProgressColumn("送仓率%", min_value=0, max_value=100, format="%.1f%%"),
-                                "还空率%": st.column_config.ProgressColumn("还空率%", min_value=0, max_value=100, format="%.1f%%")})
-    _download(by_region, "全球国家区域港后处理进度.csv", "global_region_status_export")
-    st.markdown("##### 区域待处理货柜对比")
-    chart = by_region.copy()
-    chart["国家/区域"] = chart["国家"] + " / " + chart["区域"]
-    st.bar_chart(chart.set_index("国家/区域")[["待提柜（已到港）", "待送仓（已提柜）", "待还空（已送仓）"]],
-                 horizontal=True, height=max(320, min(850, 30 * len(chart))))
-
-    st.markdown("#### ③ 区域货柜处理明细")
-    d1, d2, d3 = st.columns(3)
-    with d1:
-        region_options = sorted(scope["区域"].unique().tolist())
-        focus_region = st.selectbox("区域", ["全部区域"] + region_options, key="global_focus_region")
-    detail = scope if focus_region == "全部区域" else scope[scope["区域"].eq(focus_region)]
-    with d2:
-        statuses = ["全部", "已到港", "已提柜", "已送仓", "已还空", "待提柜（已到港）",
-                    "待送仓（已提柜）", "待还空（已送仓）", "待分配", "LFD超期待核实", "LFD三天内", "缺少ETA"]
-        status = st.selectbox("处理状态", statuses, key="global_focus_status")
-    with d3:
-        vendors = sorted(detail["港后供应商"].unique().tolist())
-        vendor = st.selectbox("港后拖车商", ["全部供应商"] + vendors, key="global_focus_vendor")
-    if status != "全部":
-        detail = detail[detail[status]]
-    if vendor != "全部供应商":
-        detail = detail[detail["港后供应商"].eq(vendor)]
-    _details(detail, "region")
-
-    with st.expander("④ 国家 / 区域 / 港后拖车商业务分配", expanded=False):
-        supplier = scope.groupby(["国家", "区域", "港后供应商"]).size().rename("柜量").reset_index()
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 国家运营对比", "🏭 区域处理工作台",
+                                      "🚛 港后供应商", "⚠️ 异常与货柜明细"])
+    with tab1:
+        st.markdown("##### 国家货柜处理情况")
+        st.dataframe(countries, hide_index=True, use_container_width=True,
+                     column_config={"送仓率%": st.column_config.ProgressColumn(
+                         "送仓率%", min_value=0, max_value=100, format="%.1f%%"),
+                         "还空率%": st.column_config.ProgressColumn(
+                         "还空率%", min_value=0, max_value=100, format="%.1f%%")})
+        _download(countries, "全球国家运营进度.csv", "global_countries_v3")
+        left, right = st.columns(2)
+        with left:
+            st.markdown("##### 国家柜量排名")
+            st.bar_chart(countries.set_index("国家")["总柜量"].sort_values(),
+                         horizontal=True, height=max(300, min(580, 33*len(countries))))
+        with right:
+            st.markdown("##### 国家送仓 / 还空量")
+            st.bar_chart(countries.set_index("国家")[["已送仓", "已还空"]],
+                         horizontal=True, height=max(300, min(580, 33*len(countries))))
+    with tab2:
+        st.markdown(f"##### {country} · 区域货柜处理矩阵")
+        region_summary = _summary(z, ["国家", "区域"])
+        st.dataframe(region_summary, hide_index=True, use_container_width=True,
+                     column_config={"送仓率%": st.column_config.ProgressColumn(
+                         "送仓率%", min_value=0, max_value=100, format="%.1f%%"),
+                         "还空率%": st.column_config.ProgressColumn(
+                         "还空率%", min_value=0, max_value=100, format="%.1f%%")})
+        _download(region_summary, "国家区域货柜处理进度.csv", "global_region_v3")
+        st.markdown("##### 区域待处理节点")
+        chart = region_summary.copy()
+        chart["国家 / 区域"] = chart["国家"] + " / " + chart["区域"]
+        chart = chart.set_index("国家 / 区域")[["待提柜（已到港）",
+                  "待送仓（已提柜）", "待还空（已送仓）"]]
+        st.bar_chart(chart, horizontal=True, height=max(320, min(760, 30*len(chart))))
+        st.caption("三种待处理节点可重叠或因里程碑缺失出现不一致，不能直接相加。")
+    with tab3:
+        st.markdown("##### 国家 / 区域 / 港后拖车商业务分配")
+        supplier = z.groupby(["国家", "区域", "港后供应商"]).size().rename("柜量").reset_index()
         supplier = supplier.sort_values("柜量", ascending=False)
-        st.dataframe(supplier, hide_index=True, use_container_width=True)
-        _download(supplier, "全球区域港后供应商分配.csv", "global_supplier_export")
-
-    st.caption("港后供应商严格使用「港后拖车行」，空白及「港后拖车测试」按待分配统计。"
-               "LFD风险为数据预警，跨国家规则不同，需人工核实。"
-               "如数据库此前仅导入美国数据，请管理员备份并重新上传全球完整文件。")
+        st.dataframe(supplier, hide_index=True, use_container_width=True, height=460)
+        _download(supplier, "全球港后供应商区域分配.csv", "global_suppliers_v3")
+        st.markdown("##### 港后拖车商柜量")
+        vendor_counts = z["港后供应商"].value_counts().head(15).sort_values()
+        st.bar_chart(vendor_counts, horizontal=True, height=max(300, min(620, 32*len(vendor_counts))))
+        st.caption("只读取「港后拖车行」；空白和「港后拖车测试」归为待分配。"
+                   "字段有供应商名称不代表供应商已确认运力。")
+    with tab4:
+        st.markdown("##### 货柜处理状态与 LFD 预警")
+        regions = sorted(z["区域"].unique().tolist())
+        a, b, c = st.columns(3)
+        with a:
+            selected_region = st.selectbox("目的仓区域", ["全部区域"] + regions,
+                                           key="global_detail_region_v3")
+        scoped = z if selected_region == "全部区域" else z[z["区域"].eq(selected_region)]
+        statuses = ["全部", "已到港", "已提柜", "已送仓", "已还空",
+                    "待提柜（已到港）", "待送仓（已提柜）", "待还空（已送仓）",
+                    "待分配", "LFD超期待核实", "LFD三天内", "缺少ETA"]
+        with b:
+            status = st.selectbox("货柜处理状态", statuses, key="global_detail_status_v3")
+        with c:
+            vendors = sorted(scoped["港后供应商"].unique().tolist())
+            selected_vendor = st.selectbox("港后拖车商", ["全部供应商"] + vendors,
+                                            key="global_detail_vendor_v3")
+        if status != "全部":
+            scoped = scoped[scoped[status]]
+        if selected_vendor != "全部供应商":
+            scoped = scoped[scoped["港后供应商"].eq(selected_vendor)]
+        _details(scoped, "global_v3")
+        st.caption("LFD为数据预警，需结合不同国家码头规则人工核实。"
+                   "缺少提柜记录不等于确认未提柜。")
+    st.caption("数据来自当前 SQLite 数据库。如仅显示美国，请由管理员先备份，"
+               "再重新上传包含全球国家的完整源文件。")
