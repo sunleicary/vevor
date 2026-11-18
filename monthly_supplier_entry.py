@@ -1,6 +1,6 @@
-"""Import the original monthly KPI workbook once and browse saved overdue rows."""
+"""Global monthly KPI workbook import: preserve every source data row for reconciliation."""
+import json
 import os
-import re
 import sqlite3
 from datetime import datetime, timezone
 from io import BytesIO
@@ -8,160 +8,143 @@ import pandas as pd
 import streamlit as st
 
 DB = os.environ.get("KPI_DB_PATH", os.path.join(os.path.dirname(__file__), "supplier_kpi.db"))
-SHEETS = {
-    "港后提柜及时率": ("是否及时", {"不及时", "否", "超时"}),
-    "送仓准时率": ("是否准时", {"不准时", "否"}),
-    "送仓时效": ("是否超时", {"是", "超时"}),
-    "提空及时率": ("是否超时", {"是", "超时"}),
-    "还柜及时率": ("是否超时", {"是", "超时"}),
-}
+SHEETS = ["港后提柜及时率", "送仓准时率", "送仓时效", "提空及时率", "还柜及时率"]
+
 def connect():
-    conn = sqlite3.connect(DB, timeout=30)
-    conn.execute("""CREATE TABLE IF NOT EXISTS kpi_imported_details(
-        month TEXT NOT NULL, metric TEXT NOT NULL, order_no TEXT NOT NULL,
-        supplier TEXT NOT NULL, region TEXT, container_no TEXT,
-        status TEXT, overdue_days TEXT, standard TEXT, actual TEXT,
-        destination TEXT, source_file TEXT, imported_at TEXT,
-        PRIMARY KEY(month,metric,order_no))""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS kpi_import_batches(
-        month TEXT PRIMARY KEY, source_file TEXT, imported_at TEXT,
+    conn = sqlite3.connect(DB, timeout=60)
+    conn.execute("""CREATE TABLE IF NOT EXISTS kpi_raw_rows_v2(
+        month TEXT NOT NULL, metric TEXT NOT NULL, source_row INTEGER NOT NULL,
+        payload TEXT NOT NULL, source_file TEXT NOT NULL, imported_at TEXT NOT NULL,
+        PRIMARY KEY(month,metric,source_row))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS kpi_batches_v2(
+        month TEXT PRIMARY KEY, source_file TEXT NOT NULL, imported_at TEXT NOT NULL,
         row_count INTEGER NOT NULL)""")
     conn.commit()
     return conn
 
-def parse_workbook(payload, assessment_month):
+def parse_month(value, chosen_month):
+    if value is None or str(value).strip() == "":
+        return chosen_month
+    if isinstance(value, datetime):
+        m = value.month
+        year = value.year
+    else:
+        raw = str(value).strip()
+        try:
+            if raw.replace(".0", "").isdigit() and int(float(raw)) <= 12:
+                m = int(float(raw))
+                year = int(chosen_month[:4])
+            else:
+                parsed = pd.to_datetime(raw, errors="raise")
+                m, year = parsed.month, parsed.year
+        except (ValueError, TypeError):
+            raise ValueError(f"无法识别源文件月份：{raw}")
+    month = f"{year}-{m:02d}"
+    if month != chosen_month:
+        raise ValueError(f"源文件月份 {month} 与所选考核月份 {chosen_month} 不一致。")
+    return month
+
+def parse_workbook(payload, month):
     from openpyxl import load_workbook
     book = load_workbook(BytesIO(payload), read_only=True, data_only=True)
-    if any(sheet not in book.sheetnames for sheet in SHEETS):
-        raise ValueError("缺少KPI工作表：" + "、".join(s for s in SHEETS if s not in book.sheetnames))
-    records = []
-    months = set()
-    for metric, (status_col, fail_values) in SHEETS.items():
-        ws = book[metric]
-        header = [str(v).strip() if v is not None else "" for v in next(ws.iter_rows(min_row=2,max_row=2,values_only=True))]
-        idx = {v:i for i,v in enumerate(header) if v}
-        required = ["月份","排柜单号","港后拖车行",status_col,"目的仓国家"]
-        if any(k not in idx for k in required):
-            raise ValueError(f"{metric} 缺少字段：" + "、".join(k for k in required if k not in idx))
-        def get(row,name):
-            i=idx.get(name)
-            return str(row[i]).strip() if i is not None and i<len(row) and row[i] is not None else ""
-        for row in ws.iter_rows(min_row=3,values_only=True):
-            order = get(row,"排柜单号")
-            if not order:
+    missing = [s for s in SHEETS if s not in book.sheetnames]
+    if missing:
+        book.close()
+        raise ValueError("缺少工作表：" + "、".join(missing))
+    rows = []
+    counts = {}
+    for sheet in SHEETS:
+        ws = book[sheet]
+        headers = next(ws.iter_rows(min_row=2, max_row=2, values_only=True))
+        columns = [str(v).strip() if v is not None and str(v).strip()
+                   else f"未命名列_{i+1}" for i,v in enumerate(headers)]
+        if "月份" not in columns:
+            book.close()
+            raise ValueError(f"{sheet} 缺少月份字段")
+        count = 0
+        for source_row, values in enumerate(ws.iter_rows(min_row=3, values_only=True), start=3):
+            # Only skip completely empty Excel rows; do not filter by country, status,
+            # supplier, order number or duplicates.
+            if not any(v is not None and str(v).strip() for v in values):
                 continue
-            country = get(row,"目的仓国家").upper()
-            if country not in {"AMERICA","美国","USA","US","UNITED STATES","UNITED STATES OF AMERICA"}:
-                continue
-            supplier = get(row,"港后拖车行")
-            if not supplier or supplier in {"nan","None","港后拖车测试"}:
-                continue
-            raw_month = get(row,"月份")
-            try:
-                m=int(float(raw_month))
-                if m<1 or m>12:continue
-            except (ValueError,TypeError):
-                continue
-            month=assessment_month
-            if m != int(assessment_month[-2:]):
-                raise ValueError(f"{metric} 的源文件月份 {m} 与所选考核月份 {assessment_month} 不一致，请核对。")
-            months.add(month)
-            status=get(row,status_col)
-            overdue=get(row,"超时天数") or get(row,"超LFD天数")
-            records.append((month,metric,order,supplier,get(row,"目的仓物流区域"),
-                get(row,"箱号"),status,overdue,
-                get(row,"标准时效") or get(row,"时效标准"),
-                get(row,"提空时效") or get(row,"还柜时效") or get(row,"送仓时效"),
-                get(row,"目的仓"), "", ""))
+            data = {}
+            for i, col in enumerate(columns):
+                v = values[i] if i < len(values) else None
+                if isinstance(v, (datetime, pd.Timestamp)):
+                    v = v.isoformat()
+                data[col] = "" if v is None else str(v)
+            parse_month(data.get("月份"), month)
+            rows.append((month, sheet, source_row, json.dumps(data, ensure_ascii=False, default=str)))
+            count += 1
+        counts[sheet] = count
     book.close()
-    if not records:
-        raise ValueError("文件中未找到美国港后拖车商的有效KPI记录。")
-    return records, months
+    return rows, counts
 
 def show_monthly_supplier_entry(df, user):
-    st.title("港后供应商 KPI 考核｜月度文件导入与超时明细")
-    st.caption("一次上传整份KPI工作簿，分别查看五项指标的超时/不及时记录。Excel仅含月份数字时，默认使用当前年份，可在导入前调整考核月份。")
+    st.title("港后供应商 KPI 考核｜全球原始数据核对")
+    st.caption("统一导入五项 KPI 原始明细，全球数据、不去重、不按考核状态筛选；保留源文件字段和原始行号。")
     try:
         with connect() as conn:
-            batches=pd.read_sql_query("SELECT * FROM kpi_import_batches ORDER BY month DESC",conn)
-    except (sqlite3.Error,OSError) as exc:
-        st.error(f"KPI数据库无法读取：{exc}")
+            batches = pd.read_sql_query("SELECT * FROM kpi_batches_v2 ORDER BY month DESC", conn)
+    except (sqlite3.Error, OSError) as exc:
+        st.error(f"无法读取数据库：{exc}")
         return
-    if user.get("role")=="管理员":
-        with st.expander("统一导入月度KPI文件",expanded=batches.empty):
-            uploaded=st.file_uploader("上传国际物流服务商KPI工作簿",type=["xlsx"],key="kpi_unified_upload")
-            assessment_month=st.selectbox("考核月份",
-                [f"{y}-{m:02d}" for y in range(2024, 2036) for m in range(1,13)],
-                index=(datetime.now().year-2024)*12 + datetime.now().month-1 if 2024 <= datetime.now().year <= 2035 else 0, key="kpi_import_month")
-            if st.button("解析并保存五项KPI明细",disabled=uploaded is None,type="primary"):
+    if user.get("role") == "管理员":
+        with st.expander("统一导入 KPI 文件", expanded=batches.empty):
+            uploaded = st.file_uploader("上传完整 KPI 工作簿", type=["xlsx"], key="kpi_global_upload")
+            choices = [f"{y}-{m:02d}" for y in range(2024, 2036) for m in range(1,13)]
+            now = datetime.now()
+            default = f"{now.year}-{now.month:02d}"
+            month = st.selectbox("考核月份", choices,
+                                 index=choices.index(default) if default in choices else 0,
+                                 key="kpi_global_month")
+            if st.button("导入并保存全部原始记录", disabled=uploaded is None, type="primary"):
                 try:
-                    rows,months=parse_workbook(uploaded.getvalue(),assessment_month)
-                    # Verify uniqueness before changing any stored data.
-                    keys=[(r[0],r[1],r[2]) for r in rows]
-                    if len(keys)!=len(set(keys)):
-                        raise ValueError("原文件存在同一月份、同一指标下重复的排柜单号，请先核对原始数据。")
-                    now=datetime.now(timezone.utc).isoformat()
-                    records=[r[:-2]+(uploaded.name,now) for r in rows]
+                    rows, counts = parse_workbook(uploaded.getvalue(), month)
+                    timestamp = datetime.now(timezone.utc).isoformat()
                     with connect() as conn:
-                        for month in months:
-                            conn.execute("DELETE FROM kpi_imported_details WHERE month=?",(month,))
-                            conn.execute("DELETE FROM kpi_import_batches WHERE month=?",(month,))
-                        conn.executemany("""INSERT INTO kpi_imported_details
-                            (month,metric,order_no,supplier,region,container_no,status,
-                            overdue_days,standard,actual,destination,source_file,imported_at)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",records)
-                        conn.executemany("""INSERT INTO kpi_import_batches(month,source_file,imported_at,row_count)
-                            VALUES (?,?,?,?)""",[(m,uploaded.name,now,sum(r[0]==m for r in rows)) for m in months])
+                        conn.execute("DELETE FROM kpi_raw_rows_v2 WHERE month=?", (month,))
+                        conn.execute("DELETE FROM kpi_batches_v2 WHERE month=?", (month,))
+                        conn.executemany("""INSERT INTO kpi_raw_rows_v2
+                            (month,metric,source_row,payload,source_file,imported_at)
+                            VALUES (?,?,?,?,?,?)""",
+                            [(m,s,n,p,uploaded.name,timestamp) for m,s,n,p in rows])
+                        conn.execute("""INSERT INTO kpi_batches_v2
+                            (month,source_file,imported_at,row_count) VALUES (?,?,?,?)""",
+                            (month,uploaded.name,timestamp,len(rows)))
                         conn.commit()
-                    st.success(f"已保存 {len(records):,} 条KPI明细，考核月份：{', '.join(sorted(months))}")
+                    st.success(f"已保存 {len(rows):,} 条原始明细。")
+                    st.dataframe(pd.DataFrame([{"指标":k,"导入记录数":v} for k,v in counts.items()]),
+                                 hide_index=True,use_container_width=True)
                     st.rerun()
                 except Exception as exc:
-                    st.error(f"导入失败，原有数据未覆盖：{exc}")
-            st.caption("重复导入同一月份将替换该月份已有的五项指标数据。业务主键为排柜单号，箱号允许重复。")
+                    st.error(f"导入失败，原有数据保持不变：{exc}")
+            st.caption("再次导入相同考核月份将覆盖该月原始记录；不会修改 Excel 中的原始考核结果。")
     if batches.empty:
-        st.info("尚未导入月度KPI文件，请管理员上传后查看。")
+        st.info("尚无已导入的全球 KPI 文件。")
         return
-    months=batches["month"].tolist()
-    month=st.selectbox("已导入考核月份",months,key="kpi_saved_month")
-    batch=batches[batches["month"].eq(month)].iloc[0]
-    st.caption(f"来源文件：{batch['source_file']}｜已保存记录：{int(batch['row_count']):,}｜导入时间(UTC)：{batch['imported_at']}")
+    selected = st.selectbox("已导入考核月份", batches["month"].tolist(), key="kpi_global_saved_month")
+    batch = batches[batches["month"].eq(selected)].iloc[0]
+    st.caption(f"来源文件：{batch['source_file']}｜总记录数：{int(batch['row_count']):,}")
     with connect() as conn:
-        data=pd.read_sql_query("SELECT * FROM kpi_imported_details WHERE month=?",conn,params=(month,))
-    if data.empty:
-        st.info("该月份无可显示记录。")
-        return
-    c1,c2=st.columns(2)
-    with c1:
-        region=st.selectbox("目的仓区域",["全部"]+sorted(data["region"].fillna("").unique().tolist()),key="kpi_saved_region")
-    with c2:
-        supplier=st.selectbox("港后拖车商",["全部"]+sorted(data["supplier"].unique().tolist()),key="kpi_saved_supplier")
-    if region!="全部":data=data[data["region"].eq(region)]
-    if supplier!="全部":data=data[data["supplier"].eq(supplier)]
-    tabs=st.tabs(list(SHEETS))
-    for tab,(metric,(status_col,fail_values)) in zip(tabs,SHEETS.items()):
+        raw = pd.read_sql_query("""SELECT metric,source_row,payload FROM kpi_raw_rows_v2
+            WHERE month=? ORDER BY metric,source_row""",conn,params=(selected,))
+    counts = raw.groupby("metric").size().reindex(SHEETS, fill_value=0)
+    st.dataframe(pd.DataFrame({"指标":SHEETS,"已保存记录数":counts.values}),
+                 hide_index=True,use_container_width=True)
+    tabs = st.tabs(SHEETS)
+    for tab, metric in zip(tabs,SHEETS):
         with tab:
-            subset=data[data["metric"].eq(metric)].copy()
-            state=subset["status"].fillna("").astype(str).str.strip()
-            # Source statuses are authoritative; question marks and blanks remain pending.
-            late=subset[state.isin(fail_values)].copy()
-            unknown=subset[~state.isin(fail_values) & ~state.isin(
-                {"及时","准时","否","未超时","不及时","不准时","是","超时"})].copy()
-            a,b,c=st.columns(3)
-            a.metric("本项记录",f"{len(subset):,}")
-            b.metric("超时/不及时",f"{len(late):,}")
-            c.metric("状态待核实",f"{len(unknown):,}")
-            if not late.empty:
-                summary=late.groupby("supplier").size().reset_index(name="超时业务数").sort_values("超时业务数",ascending=False)
-                st.dataframe(summary.rename(columns={"supplier":"港后拖车商"}),hide_index=True,use_container_width=True)
-            cols={"order_no":"排柜单号","supplier":"港后拖车商","region":"目的仓区域",
-                  "container_no":"箱号","status":"原始考核状态","overdue_days":"超时天数",
-                  "standard":"标准时效","actual":"实际时效","destination":"目的仓"}
-            st.markdown("#### 超时/不及时逐单明细")
-            st.dataframe(late[list(cols)].rename(columns=cols),hide_index=True,use_container_width=True,height=390)
-            st.download_button("导出本指标超时明细",late[list(cols)].rename(columns=cols).to_csv(index=False).encode("utf-8-sig"),
-                               file_name=f"{month}_{metric}_超时明细.csv",mime="text/csv",key=f"kpi_export_{metric}")
-            if not unknown.empty:
-                with st.expander(f"待核实记录（{len(unknown):,}）"):
-                    st.dataframe(unknown[list(cols)].rename(columns=cols),hide_index=True,use_container_width=True)
-    st.warning("数据保存在独立SQLite文件中。若Streamlit云端运行环境不提供持久化磁盘，重启后可能丢失；"
-               "生产环境需配置KPI_DB_PATH到持久化存储。")
+            part = raw[raw["metric"].eq(metric)]
+            records = [json.loads(v) for v in part["payload"]]
+            detail = pd.DataFrame(records)
+            detail.insert(0,"序列号",range(1,len(detail)+1))
+            detail.insert(1,"Excel原始行号",part["source_row"].tolist())
+            st.metric("全部原始记录",f"{len(detail):,}")
+            st.dataframe(detail,hide_index=True,use_container_width=True,height=540)
+            st.download_button("导出全部明细CSV",
+                detail.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"{selected}_{metric}_全球全部明细.csv",
+                mime="text/csv",key=f"kpi_global_export_{metric}")
+    st.warning("SQLite 文件默认位于应用本地磁盘。Streamlit Community Cloud 重启或重新部署可能清除数据；"
+               "正式持久化需使用外部数据库或持久化存储。")
