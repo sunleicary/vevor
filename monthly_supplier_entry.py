@@ -80,7 +80,7 @@ def parse_workbook(payload, assessment_month):
 
 def show_monthly_supplier_entry(df, user):
     st.title("港后供应商 KPI 考核｜月度文件导入与超时明细")
-    st.caption("一次上传整份KPI工作簿，分别查看五项指标的超时/不及时记录。月份来自Excel各工作表的「月份」字段。")
+    st.caption("一次上传整份KPI工作簿，分别查看五项指标的超时/不及时记录。Excel仅含月份数字时，默认使用当前年份，可在导入前调整考核月份。")
     try:
         with connect() as conn:
             batches=pd.read_sql_query("SELECT * FROM kpi_import_batches ORDER BY month DESC",conn)
@@ -92,7 +92,7 @@ def show_monthly_supplier_entry(df, user):
             uploaded=st.file_uploader("上传国际物流服务商KPI工作簿",type=["xlsx"],key="kpi_unified_upload")
             assessment_month=st.selectbox("考核月份",
                 [f"{y}-{m:02d}" for y in range(2024, 2036) for m in range(1,13)],
-                index=(2026-2024)*12+9, key="kpi_import_month")
+                index=(datetime.now().year-2024)*12 + datetime.now().month-1 if 2024 <= datetime.now().year <= 2035 else 0, key="kpi_import_month")
             if st.button("解析并保存五项KPI明细",disabled=uploaded is None,type="primary"):
                 try:
                     rows,months=parse_workbook(uploaded.getvalue(),assessment_month)
