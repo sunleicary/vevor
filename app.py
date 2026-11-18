@@ -14,6 +14,7 @@ from monthly_supplier_entry import show_monthly_supplier_entry
 from global_overview import show_global_overview, is_us_country
 from theme import apply_theme
 from auth import login_gate, manage_users, change_own_password
+from database_backup import show_database_backup
 
 st.set_page_config(page_title="司顺国际物流港后运营工作台", page_icon="🚢", layout="wide")
 apply_theme()
@@ -73,12 +74,19 @@ with st.sidebar:
         pages.append("业务主键质量检查")
     if user["role"] == "管理员":
         pages.append("用户管理")
+        pages.append("数据库备份中心")
     pages.append("我的账号")
     page = st.radio("业务模块", pages)
     if st.button("退出登录", key="logout_user"):
         st.session_state.pop("auth_username", None)
+        st.session_state.pop("sqlite_backup_zip", None)
+        st.session_state.pop("sqlite_backup_filename", None)
         st.rerun()
     st.caption("统计业务主键：排柜单号；供应商仅使用港后拖车行。")
+
+if page == "数据库备份中心":
+    show_database_backup(user)
+    st.stop()
 
 if page == "用户管理":
     manage_users(user)
