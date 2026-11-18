@@ -17,9 +17,9 @@ apply_theme()
 st.markdown("""<div class="vevor-topbar">
   <div class="vevor-logo">VEVOR®</div>
   <div class="vevor-divider"></div>
-  <div class="vevor-title">国际物流港后运营工作台 <span style="font-weight:500">|</span> 美国港口运营管理</div>
+  <div class="vevor-title">国际物流港后运营工作台 <span style="font-weight:500">|</span> 全球港后运营管理</div>
   <div class="vevor-tag">数据驱动 · 异常预警 · 高效提柜</div>
-</div><div class="vevor-subtitle">美国六大运营区域 · 港后拖车行统计口径 · 数据来自最近一次上传，非实时码头状态</div>""",unsafe_allow_html=True)
+</div><div class="vevor-subtitle">全球国家业务分析 + 美国六大区域运营 · 仅按港后拖车行统计 · 数据非实时码头状态</div>""",unsafe_allow_html=True)
 
 @st.cache_data(show_spinner=False)
 def read_db(mtime):
@@ -62,9 +62,9 @@ def grid(data, key="default"):
 user = login_gate()
 
 with st.sidebar:
-    st.markdown('<div class="vevor-sidebar-logo">VEVOR®<span>美国港后运营管理</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="vevor-sidebar-logo">VEVOR®<span>全球港后运营管理</span></div>', unsafe_allow_html=True)
     st.caption(f'当前用户：{user["username"]} · {user["role"]}')
-    pages = ["运营总览", "全球港后业务量分析", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析"]
+    pages = ["运营总览", "全球港后运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析"]
     if user["role"] == "管理员":
         pages.append("数据管理")
     if user["role"] == "管理员":
@@ -114,7 +114,7 @@ if page == "数据管理":
     st.stop()
 
 if not os.path.exists(DB):
-    st.warning("云端尚无业务数据库。请从左侧选择「数据管理」上传原始文件。")
+    st.warning("云端尚无业务数据库。请联系管理员在「数据管理」上传全球完整源文件。")
     st.stop()
 
 df = read_db(os.path.getmtime(DB))
