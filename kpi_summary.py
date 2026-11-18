@@ -1,6 +1,6 @@
 """Five-column KPI summary calculated from imported workbook payloads.
 
-Metric value is the user-specified attributable failure ratio, not pass rate.\nDurations and standards must be numeric and expressed in matching units.
+Metric value is the supplier pass rate after excluding non-liable failures.\nDurations and standards must be numeric and expressed in matching units.
 """
 import json
 import math
@@ -64,7 +64,7 @@ def summarize(raw):
                     exempt += 1
         if unknown:
             warnings.append(f"{metric}：{unknown:,} 条记录的考核状态无法判定，指标值暂不计算")
-        ratio = (failed - exempt) / total if total and not unknown else None
+        ratio = 1 - (failed - exempt) / total if total and not unknown else None
         summary.append({
             "指标": metric,
             "考核期间总记录数": total,
