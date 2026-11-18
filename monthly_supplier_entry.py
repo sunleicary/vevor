@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 DB = os.environ.get("KPI_DB_PATH", os.path.join(os.path.dirname(__file__), "supplier_kpi.db"))
-SHEETS = ["港后提柜及时率", "送仓准时率", "送仓时效", "提空及时率", "还柜及时率"]
+SHEETS = ["港后提柜及时率", "送仓准时率", "送仓时效", "提空及时率", "还柜及时率", "台账"]
 
 def connect():
     conn = sqlite3.connect(DB, timeout=60)
@@ -55,14 +55,15 @@ def parse_workbook(payload, month):
     counts = {}
     for sheet in SHEETS:
         ws = book[sheet]
-        headers = next(ws.iter_rows(min_row=2, max_row=2, values_only=True))
+        header_row = 1 if sheet == "台账" else 2
+        headers = next(ws.iter_rows(min_row=header_row, max_row=header_row, values_only=True))
         columns = [str(v).strip() if v is not None and str(v).strip()
                    else f"未命名列_{i+1}" for i,v in enumerate(headers)]
-        if "月份" not in columns:
+        if sheet != "台账" and "月份" not in columns:
             book.close()
             raise ValueError(f"{sheet} 缺少月份字段")
         count = 0
-        for source_row, values in enumerate(ws.iter_rows(min_row=3, values_only=True), start=3):
+        for source_row, values in enumerate(ws.iter_rows(min_row=header_row+1, values_only=True), start=header_row+1):
             # Only skip completely empty Excel rows; do not filter by country, status,
             # supplier, order number or duplicates.
             if not any(v is not None and str(v).strip() for v in values):
@@ -73,7 +74,10 @@ def parse_workbook(payload, month):
                 if isinstance(v, (datetime, pd.Timestamp)):
                     v = v.isoformat()
                 data[col] = "" if v is None else str(v)
-            parse_month(data.get("月份"), month)
+            if sheet != "台账":
+                parse_month(data.get("月份"), month)
+                if sheet == "送仓准时率" and not str(data.get("排柜单号", "")).strip():
+                    continue
             rows.append((month, sheet, source_row, json.dumps(data, ensure_ascii=False, default=str)))
             count += 1
         counts[sheet] = count
@@ -82,7 +86,7 @@ def parse_workbook(payload, month):
 
 def show_monthly_supplier_entry(df, user):
     st.title("港后供应商 KPI 考核｜全球原始数据核对")
-    st.caption("统一导入五项 KPI 原始明细，全球数据、不去重、不按考核状态筛选；保留源文件字段和原始行号。")
+    st.caption("统一导入全球五项 KPI 及台账；送仓准时率不展示排柜单号为空的记录，并通过排柜单号与台账匹配。")
     try:
         with connect() as conn:
             batches = pd.read_sql_query("SELECT * FROM kpi_batches_v2 ORDER BY month DESC", conn)
@@ -140,6 +144,18 @@ def show_monthly_supplier_entry(df, user):
             detail = pd.DataFrame(records)
             detail.insert(0,"序列号",range(1,len(detail)+1))
             detail.insert(1,"Excel原始行号",part["source_row"].tolist())
+            if metric == "送仓准时率" and not detail.empty:
+                ledger_part = raw[raw["metric"].eq("台账")]
+                ledger_keys = set()
+                for item in ledger_part["payload"]:
+                    record = json.loads(item)
+                    key = str(record.get("排柜单号", "")).strip()
+                    if key:
+                        ledger_keys.add(key)
+                keys = detail["排柜单号"].fillna("").astype(str).str.strip()
+                detail.insert(2, "台账匹配结果", keys.map(lambda k: "已匹配" if k in ledger_keys else "未匹配"))
+                matched = int((detail["台账匹配结果"] == "已匹配").sum())
+                st.caption(f"台账匹配：{matched:,} 条；未匹配：{len(detail)-matched:,} 条。仅展示排柜单号非空的送仓准时率记录。")
             st.metric("全部原始记录",f"{len(detail):,}")
             st.dataframe(detail,hide_index=True,use_container_width=True,height=540)
             st.download_button("导出全部明细CSV",
