@@ -19,6 +19,9 @@ def load(path):
     try:
         columns = ",".join('"' + f + '" TEXT' for f in FIELDS)
         conn.execute("CREATE TABLE containers (id INTEGER PRIMARY KEY," + columns + ")")
+        seen_orders = set()
+        missing_orders = 0
+        duplicate_orders = []
         cols = None
         batch = []
         count = 0
@@ -33,6 +36,14 @@ def load(path):
                 values = ["".join(c.itertext()).strip() for c in cells]
                 row = dict(zip(cols, values))
                 if any(row.get(f, "").strip() for f in ("箱号", "排柜单号")):
+                    order_no = row.get("排柜单号", "").strip()
+                    if not order_no:
+                        missing_orders += 1
+                    elif order_no in seen_orders:
+                        if len(duplicate_orders) < 10:
+                            duplicate_orders.append(order_no)
+                    else:
+                        seen_orders.add(order_no)
                     batch.append(tuple(row.get(f, "") for f in FIELDS))
                     count += 1
             if len(batch) >= 500:
@@ -43,6 +54,16 @@ def load(path):
                 del el.getparent()[0]
         if batch:
             conn.executemany(insert, batch)
+        duplicate_count = count - len(seen_orders) - missing_orders
+        if missing_orders or duplicate_count:
+            samples = ", ".join(duplicate_orders)
+            raise ValueError(
+                f"业务主键校验失败：排柜单号为空 {missing_orders} 行，"
+                f"排柜单号重复 {duplicate_count} 行。重复样例：{samples}。"
+                "导入已中止，原数据库保持不变。请核实原始业务记录。"
+            )
+        conn.execute('CREATE UNIQUE INDEX idx_order_no ON containers("排柜单号")')
+        conn.execute('CREATE INDEX idx_container_no ON containers("箱号")')
         conn.execute('CREATE INDEX idx_region ON containers("目的仓物流区域")')
         conn.commit()
         if not count:
