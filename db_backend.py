@@ -105,7 +105,7 @@ def read_sql(query, conn, params=None):
     import pandas as pd
     if is_neon():
         with conn.cursor() as cur:
-            cur.execute(query, params)
+            cur.execute(_translate(query), params)
             rows = cur.fetchall()
             columns = [c.name for c in cur.description]
         return pd.DataFrame([tuple(row[i] for i in range(len(columns))) for row in rows], columns=columns)
