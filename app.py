@@ -451,10 +451,131 @@ elif page == "货柜查询":
     st.caption(f"符合条件 {len(q):,} 条")
     grid(q, key="container_search")
 elif page == "LFD预警":
-    st.info("根据原始 LFD 与提柜时间推断；缺少提柜记录需人工核实，非实时码头状态。")
-    choices = st.multiselect("风险类型", sorted(q["风险"].unique()),
-                             default=[x for x in ["LFD 3天内", "LFD已过/提箱待核实", "提箱晚于LFD"] if x in q["风险"].values])
-    grid(q[q["风险"].isin(choices)].sort_values("LFD_dt", na_position="last"), key="lfd_alerts")
+    st.title("🚨 全美 LFD 风险监控中心")
+    st.caption("统计基于已上传业务数据，不代表实时码头状态；区域、港后供应商及 ETA 范围受左侧筛选控制。")
+    st.info("「已过LFD待核实」表示 LFD 已过且尚无实际提箱时间记录，需人工确认；"
+            "「历史超期提箱」表示记录的实际提箱日期晚于 LFD。两者分别统计，不重复计算。")
+    alert = q.copy()
+    alert["港后供应商"] = alert["港后拖车行"].fillna("").astype(str).str.strip()
+    alert.loc[alert["港后供应商"].isin(["", "nan", "None"]), "港后供应商"] = "未分配/未记录"
+    alert["超期天数"] = (today - alert["LFD_dt"].dt.normalize()).dt.days
+    alert["历史提箱超期天数"] = (
+        alert["进口实际提箱时间_dt"].dt.normalize() - alert["LFD_dt"].dt.normalize()
+    ).dt.days
+    active_overdue = alert["风险"].eq("LFD已过/提箱待核实")
+    approaching = alert["风险"].eq("LFD 3天内")
+    historical = alert["风险"].eq("提箱晚于LFD")
+    no_lfd = alert["风险"].eq("缺少LFD")
+    kpi_items = [
+        ("已过LFD待核实", int(active_overdue.sum())),
+        ("超期≥3天待核实", int((active_overdue & alert["超期天数"].ge(3)).sum())),
+        ("LFD三天内", int(approaching.sum())),
+        ("历史超期提箱", int(historical.sum())),
+        ("缺少LFD", int(no_lfd.sum())),
+    ]
+    for col, (label, count) in zip(st.columns(5), kpi_items):
+        col.metric(label, f"{count:,}")
+    st.markdown("### 🗺️ 各区域 LFD 风险排名")
+    region_totals = alert.groupby("区域").size().rename("总柜量")
+    region_risks = pd.DataFrame(index=region_totals.index)
+    region_risks["总柜量"] = region_totals
+    for label, mask in [
+        ("已过LFD待核实", active_overdue),
+        ("超期≥3天", active_overdue & alert["超期天数"].ge(3)),
+        ("超期≥7天", active_overdue & alert["超期天数"].ge(7)),
+        ("LFD三天内", approaching),
+        ("历史超期提箱", historical),
+        ("缺少LFD", no_lfd),
+    ]:
+        region_risks[label] = alert.loc[mask].groupby("区域").size().reindex(
+            region_risks.index, fill_value=0)
+    region_risks["待核实超期占比(%)"] = (
+        region_risks["已过LFD待核实"] / region_risks["总柜量"] * 100
+    ).round(1)
+    region_risks = region_risks.sort_values(
+        ["已过LFD待核实", "超期≥7天"], ascending=False).reset_index()
+    st.dataframe(region_risks, hide_index=True, use_container_width=True)
+    if not region_risks.empty:
+        st.bar_chart(region_risks.set_index("区域")[
+            ["已过LFD待核实", "LFD三天内", "历史超期提箱"]],
+            horizontal=True, height=max(280, len(region_risks) * 48))
+    st.download_button("导出各区域LFD风险汇总 CSV",
+        region_risks.to_csv(index=False).encode("utf-8-sig"),
+        file_name="全美区域LFD风险汇总.csv", mime="text/csv", key="lfd_region_export")
+
+    st.markdown("### 🔎 区域及港后供应商风险追踪")
+    r1, r2, r3 = st.columns([1.1, 1.4, 1.3])
+    with r1:
+        selected_lfd_region = st.selectbox("查看区域",
+            ["全部区域"] + region_risks["区域"].tolist(), key="lfd_region_focus")
+    scope = alert if selected_lfd_region == "全部区域" else alert[
+        alert["区域"].eq(selected_lfd_region)]
+    with r2:
+        selected_lfd_vendor = st.selectbox("港后拖车商",
+            ["全部供应商"] + sorted(scope["港后供应商"].unique().tolist()),
+            key="lfd_vendor_focus")
+    with r3:
+        selected_lfd_status = st.selectbox("风险类别", [
+            "已过LFD待核实", "LFD三天内", "历史超期提箱", "缺少LFD", "全部风险"
+        ], key="lfd_status_focus")
+    vendor_summary = pd.DataFrame(index=scope.groupby("港后供应商").size().index)
+    vendor_summary["总柜量"] = scope.groupby("港后供应商").size()
+    for label, risk_name in [
+        ("已过LFD待核实", "LFD已过/提箱待核实"),
+        ("LFD三天内", "LFD 3天内"),
+        ("历史超期提箱", "提箱晚于LFD"),
+        ("缺少LFD", "缺少LFD"),
+    ]:
+        vendor_summary[label] = scope.loc[scope["风险"].eq(risk_name)].groupby(
+            "港后供应商").size().reindex(vendor_summary.index, fill_value=0)
+    vendor_summary["超期≥3天"] = scope.loc[
+        scope["风险"].eq("LFD已过/提箱待核实") & scope["超期天数"].ge(3)
+    ].groupby("港后供应商").size().reindex(vendor_summary.index, fill_value=0)
+    vendor_summary = vendor_summary.sort_values(
+        ["已过LFD待核实", "LFD三天内"], ascending=False).reset_index()
+    if selected_lfd_vendor != "全部供应商":
+        vendor_summary = vendor_summary[
+            vendor_summary["港后供应商"].eq(selected_lfd_vendor)]
+    st.markdown("#### 港后供应商 LFD 风险汇总")
+    st.dataframe(vendor_summary, hide_index=True, use_container_width=True)
+    st.download_button("导出港后供应商风险汇总 CSV",
+        vendor_summary.to_csv(index=False).encode("utf-8-sig"),
+        file_name="港后供应商LFD风险汇总.csv", mime="text/csv", key="lfd_vendor_export")
+
+    status_mapping = {
+        "已过LFD待核实": ["LFD已过/提箱待核实"],
+        "LFD三天内": ["LFD 3天内"],
+        "历史超期提箱": ["提箱晚于LFD"],
+        "缺少LFD": ["缺少LFD"],
+        "全部风险": ["LFD已过/提箱待核实", "LFD 3天内", "提箱晚于LFD", "缺少LFD"],
+    }
+    details = scope[scope["风险"].isin(status_mapping[selected_lfd_status])].copy()
+    if selected_lfd_vendor != "全部供应商":
+        details = details[details["港后供应商"].eq(selected_lfd_vendor)]
+    if selected_lfd_status == "已过LFD待核实":
+        age = st.selectbox("超期程度", ["全部", "1–2天", "3–6天", "7天及以上"],
+                           key="lfd_age_filter")
+        if age == "1–2天":
+            details = details[details["超期天数"].between(1, 2)]
+        elif age == "3–6天":
+            details = details[details["超期天数"].between(3, 6)]
+        elif age == "7天及以上":
+            details = details[details["超期天数"].ge(7)]
+    details = details.sort_values("LFD_dt", na_position="last")
+    st.markdown(f"#### 📋 风险货柜明细 · {len(details):,} 柜")
+    if not details.empty:
+        view_cols = ["柜号显示", "区域", "目的仓", "港后拖车行", "船公司",
+                     "ETA日期", "ATA日期", "LFD", "超期天数",
+                     "历史提箱超期天数", "进口实际提箱时间", "风险"]
+        st.dataframe(details[view_cols].rename(columns={
+            "柜号显示": "箱号/排柜单号", "超期天数": "距LFD已过天数",
+            "历史提箱超期天数": "历史提箱超期天数"
+        }), hide_index=True, use_container_width=True, height=480)
+    else:
+        st.success("当前筛选条件下无匹配风险货柜。")
+    st.download_button("导出当前风险货柜 CSV",
+        details.to_csv(index=False).encode("utf-8-sig"),
+        file_name="LFD风险货柜明细.csv", mime="text/csv", key="lfd_detail_export")
 elif page == "拖车商分析":
     st.subheader("港后拖车商业务量")
     s = q[q["港后拖车行"].fillna("").astype(str).str.strip().ne("")]
