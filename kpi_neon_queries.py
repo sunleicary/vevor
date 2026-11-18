@@ -25,10 +25,16 @@ def filters(supplier=None, region=None):
         args.append(region)
     return where, args
 
-def options(conn, month, supplier=None):
-    suffix, extra = filters(supplier=supplier)
-    field = "目的仓物流区域" if supplier is not None else "港后拖车行"
+def options(conn, month):
+    suffix, extra = "", []
+    field = "港后拖车行"
     query = f"""SELECT DISTINCT btrim(coalesce(payload::jsonb ->> '{field}','')) AS value
+        FROM kpi_raw_rows_v2 WHERE {BASE} {suffix} ORDER BY value"""
+    return read_sql(query, conn, params=params(month) + tuple(extra))["value"].tolist()
+
+def region_options(conn, month, supplier=None):
+    suffix, extra = filters(supplier=supplier)
+    query = f"""SELECT DISTINCT btrim(coalesce(payload::jsonb ->> '目的仓物流区域','')) AS value
         FROM kpi_raw_rows_v2 WHERE {BASE} {suffix} ORDER BY value"""
     return read_sql(query, conn, params=params(month) + tuple(extra))["value"].tolist()
 
