@@ -63,8 +63,7 @@ def parse_workbook(payload, month):
             raise ValueError(f"{sheet} 缺少月份字段")
         count = 0
         for source_row, values in enumerate(ws.iter_rows(min_row=3, values_only=True), start=3):
-            # Only skip completely empty Excel rows; do not filter by country, status,
-            # supplier, order number or duplicates.
+            # Preserve global original rows, except blank order numbers in 送仓时效.
             if not any(v is not None and str(v).strip() for v in values):
                 continue
             data = {}
@@ -74,6 +73,8 @@ def parse_workbook(payload, month):
                     v = v.isoformat()
                 data[col] = "" if v is None else str(v)
             parse_month(data.get("月份"), month)
+            if sheet == "送仓时效" and not str(data.get("排柜单号", "")).strip():
+                continue
             rows.append((month, sheet, source_row, json.dumps(data, ensure_ascii=False, default=str)))
             count += 1
         counts[sheet] = count
@@ -82,7 +83,7 @@ def parse_workbook(payload, month):
 
 def show_monthly_supplier_entry(df, user):
     st.title("港后供应商 KPI 考核｜全球原始数据核对")
-    st.caption("统一导入五项 KPI 原始明细，全球数据、不去重、不按考核状态筛选；保留源文件字段和原始行号。")
+    st.caption("统一导入五项 KPI 全球明细、不去重、不按考核状态筛选；送仓时效排除排柜单号为空的记录。")
     try:
         with connect() as conn:
             batches = pd.read_sql_query("SELECT * FROM kpi_batches_v2 ORDER BY month DESC", conn)
@@ -129,6 +130,13 @@ def show_monthly_supplier_entry(df, user):
     with connect() as conn:
         raw = pd.read_sql_query("""SELECT metric,source_row,payload FROM kpi_raw_rows_v2
             WHERE month=? ORDER BY metric,source_row""",conn,params=(selected,))
+    # Apply the same rule to records imported before this release.
+    if not raw.empty:
+        mask = raw["metric"].eq("送仓时效")
+        if mask.any():
+            valid = raw.loc[mask, "payload"].map(
+                lambda p: bool(str(json.loads(p).get("排柜单号", "")).strip()))
+            raw = raw.loc[~mask | raw.index.isin(valid.index[valid])].copy()
     counts = raw.groupby("metric").size().reindex(SHEETS, fill_value=0)
     st.dataframe(pd.DataFrame({"指标":SHEETS,"已保存记录数":counts.values}),
                  hide_index=True,use_container_width=True)
@@ -140,7 +148,7 @@ def show_monthly_supplier_entry(df, user):
             detail = pd.DataFrame(records)
             detail.insert(0,"序列号",range(1,len(detail)+1))
             detail.insert(1,"Excel原始行号",part["source_row"].tolist())
-            st.metric("全部原始记录",f"{len(detail):,}")
+            st.metric("有效明细记录" if metric == "送仓时效" else "全部原始记录",f"{len(detail):,}")
             st.dataframe(detail,hide_index=True,use_container_width=True,height=540)
             st.download_button("导出全部明细CSV",
                 detail.to_csv(index=False).encode("utf-8-sig"),
