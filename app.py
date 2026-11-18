@@ -213,6 +213,65 @@ elif page == "运营总览":
                     st.caption("明细受当前区域、拖车商及 ETA 范围筛选影响；缺少提柜记录不代表确认未提柜。")
                     grid(detail_rows, key=f"metric_detail_{i}_{selected_metric}")
 
+            st.markdown("### 🚨 区域港后供应商 LFD 预警统计")
+            with st.container(border=True):
+                st.caption("按当前区域及 ETA 范围统计；仅使用「港后拖车行」字段。"
+                           "预警分为已过待核实、三天内到期、提箱晚于LFD；缺少提箱记录不等于确认未提箱。")
+                alert_data = z.copy()
+                alert_data["港后供应商"] = alert_data["港后拖车行"].fillna("").astype(str).str.strip()
+                alert_data.loc[alert_data["港后供应商"].isin(
+                    ["", "nan", "None", "港后拖车测试"]), "港后供应商"] = "待分配/未记录"
+                alert_types = ["LFD已过/提箱待核实", "LFD 3天内", "提箱晚于LFD"]
+                alert_data["是否LFD预警"] = alert_data["风险"].isin(alert_types)
+                if alert_data.empty:
+                    st.info("当前区域及筛选条件下没有货柜记录。")
+                else:
+                    vendor_totals = alert_data.groupby("港后供应商").size().rename("区域内供应商总柜量")
+                    vendor_alerts = (pd.crosstab(alert_data["港后供应商"], alert_data["风险"])
+                                     .reindex(index=vendor_totals.index, columns=alert_types, fill_value=0))
+                    vendor_alerts = vendor_alerts.rename(columns={
+                        "LFD已过/提箱待核实": "LFD已过待核实",
+                        "LFD 3天内": "LFD三天内",
+                        "提箱晚于LFD": "提箱晚于LFD"})
+                    vendor_alerts.insert(0, "区域内供应商总柜量", vendor_totals)
+                    vendor_alerts["预警合计"] = vendor_alerts[
+                        ["LFD已过待核实", "LFD三天内", "提箱晚于LFD"]].sum(axis=1)
+                    vendor_alerts["预警占比(%)"] = (
+                        vendor_alerts["预警合计"] / vendor_alerts["区域内供应商总柜量"] * 100
+                    ).round(1)
+                    vendor_alerts = vendor_alerts.sort_values(
+                        ["预警合计", "区域内供应商总柜量"], ascending=False).reset_index()
+                    st.dataframe(vendor_alerts, hide_index=True, use_container_width=True)
+                    st.download_button("导出该区域供应商LFD预警汇总 CSV",
+                        vendor_alerts.to_csv(index=False).encode("utf-8-sig"),
+                        file_name=f"港后供应商LFD预警_{i}.csv", mime="text/csv",
+                        key=f"overview_vendor_lfd_export_{i}")
+                    warning_rows = alert_data[alert_data["是否LFD预警"]]
+                    if not warning_rows.empty:
+                        st.markdown("##### 各供应商 LFD 预警柜量")
+                        plot = vendor_alerts.set_index("港后供应商")[
+                            ["LFD已过待核实", "LFD三天内", "提箱晚于LFD"]]
+                        st.bar_chart(plot, horizontal=True,
+                                     height=max(260, min(650, len(plot) * 32)),
+                                     key=f"overview_vendor_lfd_chart_{i}")
+                        with st.expander("🔎 按供应商查看 LFD 预警货柜明细", expanded=False):
+                            suppliers = vendor_alerts.loc[
+                                vendor_alerts["预警合计"] > 0, "港后供应商"].tolist()
+                            selected_vendor = st.selectbox("港后拖车商", ["全部供应商"] + suppliers,
+                                key=f"overview_vendor_lfd_select_{i}")
+                            selected_type = st.selectbox("LFD预警类型", ["全部类型"] + alert_types,
+                                key=f"overview_vendor_lfd_type_{i}")
+                            details = warning_rows
+                            if selected_vendor != "全部供应商":
+                                details = details[details["港后供应商"].eq(selected_vendor)]
+                            if selected_type != "全部类型":
+                                details = details[details["风险"].eq(selected_type)]
+                            details = details.sort_values("LFD_dt", na_position="last")
+                            st.caption(f"符合条件 {len(details):,} 柜")
+                            grid(details, key=f"overview_vendor_lfd_detail_{i}")
+                    if carrier != "全部":
+                        st.caption("左侧已筛选单个港后拖车商；切换为「全部」可比较该区域所有供应商。")
+
             st.markdown("### 📊 区域业务与拖车商分配")
             chart_left, chart_right = st.columns([1, 1], gap="large")
             with chart_left:
