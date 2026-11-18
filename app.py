@@ -26,7 +26,7 @@ st.markdown("""<div class="vevor-topbar">
   <div class="vevor-tag">数据驱动 · 异常预警 · 高效提柜</div>
 </div><div class="vevor-subtitle">全球国家业务分析 + 美国六大区域运营 · 仅按港后拖车行统计 · 数据非实时码头状态</div>""",unsafe_allow_html=True)
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=60)
 def read_db(mtime):
     with db_connect(DB) as conn:
         return read_sql("SELECT * FROM containers", conn)
