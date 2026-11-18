@@ -39,7 +39,7 @@ def region(value):
     return next((name for name, keys in mappings.items() if any(k in s for k in keys)), "其他区域")
 
 def grid(data, key="default"):
-    columns = ["柜号显示", "区域", "目的仓", "船公司", "实际船名", "实际航次",
+    columns = ["排柜单号", "箱号", "柜号显示", "区域", "目的仓", "船公司", "实际船名", "实际航次",
                "ETA日期", "ATA日期", "港后拖车行", "LFD", "进口实际提箱时间",
                "实际送仓时间", "实际还柜日期", "风险"]
     # Some pages pass raw database rows without the derived display column.
@@ -52,7 +52,7 @@ def grid(data, key="default"):
     for field in columns:
         if field not in data.columns:
             data[field] = ""
-    visible = data[columns].rename(columns={"柜号显示": "箱号/排柜单号"})
+    visible = data[columns].rename(columns={"柜号显示": "显示柜号"})
     st.dataframe(visible, hide_index=True, use_container_width=True, height=450)
     st.download_button("导出当前结果 CSV",
                        visible.to_csv(index=False).encode("utf-8-sig"),
@@ -67,6 +67,7 @@ with st.sidebar:
     pages = ["运营总览", "全球港后运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析"]
     if user["role"] == "管理员":
         pages.append("数据管理")
+        pages.append("业务主键质量检查")
     if user["role"] == "管理员":
         pages.append("用户管理")
     pages.append("我的账号")
@@ -74,7 +75,7 @@ with st.sidebar:
     if st.button("退出登录", key="logout_user"):
         st.session_state.pop("auth_username", None)
         st.rerun()
-    st.caption("供应商仅使用“港后拖车行”字段，不混用港前拖车商。")
+    st.caption("统计业务主键：排柜单号；供应商仅使用港后拖车行。")
 
 if page == "用户管理":
     manage_users(user)
@@ -85,6 +86,40 @@ if page == "我的账号":
     st.stop()
 
 # Allow first-time cloud imports before attempting to read the database.
+if page == "业务主键质量检查":
+    if user["role"] != "管理员":
+        st.error("仅管理员可查看数据质量检查。")
+        st.stop()
+    if not os.path.exists(DB):
+        st.info("尚无业务数据。")
+        st.stop()
+    raw = read_db(os.path.getmtime(DB))
+    keys = raw["排柜单号"].fillna("").astype(str).str.strip()
+    missing = keys.eq("")
+    duplicated = keys.ne("") & keys.duplicated(keep=False)
+    st.title("🔎 业务主键质量检查")
+    st.caption("排柜单号是唯一业务标识；箱号允许重复。检查现有数据库，不修改原始记录。")
+    a, b, c, d = st.columns(4)
+    a.metric("原始记录行数", f"{len(raw):,}")
+    b.metric("唯一有效排柜单号", f"{keys[keys.ne('')].nunique():,}")
+    c.metric("排柜单号为空", f"{int(missing.sum()):,}")
+    d.metric("涉及重复排柜单号的行数", f"{int(duplicated.sum()):,}")
+    bad = raw.loc[missing | duplicated].copy()
+    bad.insert(0, "异常类型", ["排柜单号为空" if v else "排柜单号重复"
+                              for v in missing.loc[bad.index]])
+    if bad.empty:
+        st.success("当前数据库的排柜单号完整且唯一。")
+    else:
+        st.warning("存在业务主键异常。统计看板会按排柜单号只计一次，重复业务保留原始记录供核实。"
+                   "同一排柜单号多行信息不一致时，暂按原始记录中最后一行展示，需核对后重新导入。")
+        st.dataframe(bad, hide_index=True, use_container_width=True)
+        st.download_button("导出异常记录 CSV", bad.to_csv(index=False).encode("utf-8-sig"),
+                           file_name="排柜单号异常记录.csv", mime="text/csv", key="key_quality_export")
+    box = raw["箱号"].fillna("").astype(str).str.strip()
+    repeated_boxes = box.ne("") & box.duplicated(keep=False)
+    st.caption(f"重复箱号涉及 {int(repeated_boxes.sum()):,} 行（允许，不作为业务主键异常）。")
+    st.stop()
+
 if page == "数据管理":
     if user["role"] != "管理员":
         st.error("权限不足：仅管理员可访问数据管理及上传业务数据。")
@@ -118,6 +153,17 @@ if not os.path.exists(DB):
     st.stop()
 
 df = read_db(os.path.getmtime(DB))
+# All reporting uses 排柜单号 as the business key; 箱号 is allowed to repeat.
+order_keys = df["排柜单号"].fillna("").astype(str).str.strip()
+valid_orders = order_keys.ne("")
+duplicate_orders = valid_orders & order_keys.duplicated(keep=False)
+if (~valid_orders).any() or duplicate_orders.any():
+    st.warning(f"业务主键质量提示：排柜单号为空 {int((~valid_orders).sum()):,} 行，"
+               f"重复排柜单号涉及 {int(duplicate_orders.sum()):,} 行。"
+               "统计按排柜单号去重；空主键记录不计入业务量。管理员可在「业务主键质量检查」查看明细。")
+df = df.loc[valid_orders].copy()
+df["排柜单号"] = order_keys.loc[df.index]
+df = df.drop_duplicates(subset=["排柜单号"], keep="last").copy()
 df["区域"] = df["目的仓物流区域"].fillna("").map(region)
 for col in ["ETA日期", "ATA日期", "LFD", "进口实际提箱时间", "实际送仓时间", "实际还柜日期"]:
     df[col + "_dt"] = pd.to_datetime(df[col], errors="coerce", format="mixed")
