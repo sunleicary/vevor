@@ -4,6 +4,7 @@ import os
 import sqlite3
 from db_backend import connect as db_connect, read_sql, is_neon
 from create_neon_schema import KPI_TABLES
+from kpi_summary import summarize
 from datetime import datetime, timezone
 from io import BytesIO
 import pandas as pd
@@ -163,9 +164,12 @@ def show_monthly_supplier_entry(df, user):
             valid = raw.loc[mask, "payload"].map(
                 lambda p: bool(str(json.loads(p).get("排柜单号", "")).strip()))
             raw = raw.loc[~mask | raw.index.isin(valid.index[valid])].copy()
-    counts = raw.groupby("metric").size().reindex(SHEETS, fill_value=0)
-    st.dataframe(pd.DataFrame({"指标":SHEETS,"已保存记录数":counts.values}),
-                 hide_index=True,use_container_width=True)
+    summary, warnings = summarize(raw)
+    st.markdown("### 五项考核指标汇总")
+    st.caption("指标值 =（考核不达标记录数 − 供应商无责记录数）÷ 考核期间总记录数。此处为供应商有责不达标占比，并非达标率。")
+    st.dataframe(summary, hide_index=True, use_container_width=True)
+    for warning in dict.fromkeys(warnings):
+        st.warning(warning)
     tabs = st.tabs(SHEETS)
     for tab, metric in zip(tabs,SHEETS):
         with tab:
