@@ -142,7 +142,7 @@ def show_global_overview(df):
             st.caption(label)
             st.markdown(f"<div style='font-size:1.45rem;font-weight:750;color:#123765'>{value:,}</div>",
                         unsafe_allow_html=True)
-    st.caption("柜量为原始记录行数，不按箱号去重。处理节点基于原始日期字段；"
+    st.caption("柜量按「排柜单号」唯一业务记录统计，允许箱号重复。处理节点基于原始日期字段；"
                "无记录不等于现场未完成。区域使用「目的仓物流区域」原始值，不推断归属。")
 
     tab1, tab2, tab3, tab4 = st.tabs(["📊 国家运营对比", "🏭 区域处理工作台",
