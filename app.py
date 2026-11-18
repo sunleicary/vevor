@@ -201,7 +201,7 @@ q["柜号显示"] = q["箱号"].replace("", pd.NA).fillna(q["排柜单号"])
 
 if page == "港后供应商KPI考核":
     show_kpi_overview(df)
-elf page == "全美港后供应商总览":
+elif page == "全美港后供应商总览":
     show_supplier_overview(df, grid)
 elif page == "运营总览":
     names = [None, "新泽西 NJ", "萨凡纳 SAV", "洛杉矶 LA/LB", "休斯顿 HOU", "芝加哥 CHI", "亚特兰大 ATL"]
