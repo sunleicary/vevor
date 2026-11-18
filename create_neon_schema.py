@@ -22,6 +22,16 @@ BUSINESS_FIELDS = [
 ]
 
 
+KPI_TABLES = {
+    "港后提柜及时率": "kpi_pickup_timeliness",
+    "送仓准时率": "kpi_delivery_punctuality",
+    "送仓时效": "kpi_delivery_duration",
+    "提空及时率": "kpi_empty_pickup_timeliness",
+    "还柜及时率": "kpi_empty_return_timeliness",
+    "台账": "kpi_source_ledger",
+}
+
+
 def main():
     url = os.environ.get("DATABASE_URL")
     if not url:
@@ -48,6 +58,22 @@ def main():
                     imported_at TEXT NOT NULL,
                     PRIMARY KEY (month, metric, source_row)
                 )""")
+                # Six independent KPI detail tables; payload preserves all original Excel columns.
+                for table in KPI_TABLES.values():
+                    conn.execute(sql.SQL("""CREATE TABLE IF NOT EXISTS {} (
+                        month TEXT NOT NULL,
+                        source_row INTEGER NOT NULL,
+                        order_no TEXT,
+                        supplier TEXT,
+                        payload JSONB NOT NULL,
+                        source_file TEXT NOT NULL,
+                        imported_at TEXT NOT NULL,
+                        PRIMARY KEY (month, source_row)
+                    )""").format(sql.Identifier(table)))
+                    conn.execute(sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} (month, supplier)").format(
+                        sql.Identifier("idx_" + table + "_month_supplier"), sql.Identifier(table)))
+                    conn.execute(sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} (order_no)").format(
+                        sql.Identifier("idx_" + table + "_order"), sql.Identifier(table)))
                 conn.execute("""CREATE TABLE IF NOT EXISTS kpi_batches_v2 (
                     month TEXT PRIMARY KEY,
                     source_file TEXT NOT NULL,
@@ -69,7 +95,7 @@ def main():
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_kpi_month_metric ON kpi_raw_rows_v2 (month, metric)")
                 conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (lower(username))")
 
-            for table in ("containers", "kpi_raw_rows_v2", "kpi_batches_v2", "users"):
+            for table in ("containers", "kpi_raw_rows_v2", "kpi_batches_v2", "users", *KPI_TABLES.values()):
                 count = conn.execute(
                     sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table))
                 ).fetchone()[0]
