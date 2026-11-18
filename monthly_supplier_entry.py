@@ -164,16 +164,37 @@ def show_monthly_supplier_entry(df, user):
             valid = raw.loc[mask, "payload"].map(
                 lambda p: bool(str(json.loads(p).get("排柜单号", "")).strip()))
             raw = raw.loc[~mask | raw.index.isin(valid.index[valid])].copy()
-    summary, warnings = summarize(raw)
+    # Supplier identity comes exclusively from the 港后拖车行 column in each KPI sheet.
+    # Never infer post-port suppliers from 港前拖车行 or other vendor fields.
+    if not raw.empty:
+        raw = raw.copy()
+        raw["_supplier"] = raw["payload"].map(
+            lambda p: str(json.loads(p).get("港后拖车行", "") or "").strip())
+    else:
+        raw["_supplier"] = pd.Series(dtype=str)
+    suppliers = sorted(v for v in raw["_supplier"].unique() if v)
+    supplier_options = ["全部供应商"] + suppliers
+    if raw["_supplier"].eq("").any():
+        supplier_options.append("未填写港后拖车行")
+    selected_supplier = st.selectbox(
+        "港后拖车供应商", supplier_options, key="kpi_global_supplier")
+    if selected_supplier == "未填写港后拖车行":
+        visible_raw = raw.loc[raw["_supplier"].eq("")].copy()
+    elif selected_supplier == "全部供应商":
+        visible_raw = raw
+    else:
+        visible_raw = raw.loc[raw["_supplier"].eq(selected_supplier)].copy()
+    summary, warnings = summarize(visible_raw)
     st.markdown("### 五项考核指标汇总")
-    st.caption("指标值 = 1 −（考核不达标记录数 − 供应商无责记录数）÷ 考核期间总记录数。此处为供应商考核达标率。港后提柜按超LFD天数>0；其余四项按对应时效字段>标准时效判定。时效与标准须为相同单位的数值。")
+    st.caption("指标值 = 1 −（考核不达标记录数 − 供应商无责记录数）÷ 考核期间总记录数。此处为供应商考核达标率。港后提柜按超LFD天数>0；其余四项按对应时效字段>各 Sheet 的时效标准判定。时效与标准须为相同单位的数值。")
+    st.caption(f"当前供应商：{selected_supplier}｜仅按各 Sheet 的「港后拖车行」字段筛选。")
     st.dataframe(summary, hide_index=True, use_container_width=True)
     for warning in dict.fromkeys(warnings):
         st.warning(warning)
     tabs = st.tabs(SHEETS)
     for tab, metric in zip(tabs,SHEETS):
         with tab:
-            part = raw[raw["metric"].eq(metric)]
+            part = visible_raw[visible_raw["metric"].eq(metric)]
             records = [json.loads(v) for v in part["payload"]]
             detail = pd.DataFrame(records)
             detail.insert(0,"序列号",range(1,len(detail)+1))
