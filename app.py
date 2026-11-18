@@ -9,6 +9,7 @@ from import_data import DB, load
 from container_detail import show_container_detail
 from supplier_overview import show_supplier_overview
 from theme import apply_theme
+from auth import login_gate, manage_users, change_own_password
 
 st.set_page_config(page_title="司顺国际物流港后运营工作台", page_icon="🚢", layout="wide")
 apply_theme()
@@ -57,10 +58,30 @@ def grid(data, key="default"):
                        file_name="港后货柜查询.csv", mime="text/csv",
                        key=f"download_csv_{key}")
 
+user = login_gate()
+
 with st.sidebar:
     st.markdown('<div class="vevor-sidebar-logo">VEVOR®<span>美国港后运营管理</span></div>', unsafe_allow_html=True)
-    page = st.radio("业务模块", ["运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "数据管理"])
+    st.caption(f'当前用户：{user["username"]} · {user["role"]}')
+    pages = ["运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析"]
+    if user["role"] in ("管理员", "运营人员"):
+        pages.append("数据管理")
+    if user["role"] == "管理员":
+        pages.append("用户管理")
+    pages.append("我的账号")
+    page = st.radio("业务模块", pages)
+    if st.button("退出登录", key="logout_user"):
+        st.session_state.pop("auth_username", None)
+        st.rerun()
     st.caption("供应商仅使用“港后拖车行”字段，不混用港前拖车商。")
+
+if page == "用户管理":
+    manage_users(user)
+    st.stop()
+
+if page == "我的账号":
+    change_own_password(user)
+    st.stop()
 
 # Allow first-time cloud imports before attempting to read the database.
 if page == "数据管理":
@@ -71,29 +92,6 @@ if page == "数据管理":
     else:
         with sqlite3.connect(DB) as conn:
             st.metric("当前数据库记录数", conn.execute("SELECT COUNT(*) FROM containers").fetchone()[0])
-    admin_password = st.secrets.get("ADMIN_PASSWORD", "")
-    if not admin_password:
-        st.error("为防止公开网页被任意人员上传或覆盖业务数据，请先在 Streamlit App settings → Secrets 配置 ADMIN_PASSWORD。")
-        st.code('ADMIN_PASSWORD = "请设置一个强密码"', language="toml")
-        st.stop()
-    import hmac
-    if not st.session_state.get("data_admin_authenticated", False):
-        with st.form("data_admin_login", clear_on_submit=True):
-            supplied_password = st.text_input("数据管理员密码", type="password")
-            submitted = st.form_submit_button("登录数据管理", type="primary")
-        if submitted:
-            if hmac.compare_digest(supplied_password.encode("utf-8"), str(admin_password).encode("utf-8")):
-                st.session_state.data_admin_authenticated = True
-                st.rerun()
-            else:
-                st.error("管理员密码不正确，请检查 Streamlit Cloud → App settings → Secrets 中的 ADMIN_PASSWORD。")
-        else:
-            st.info("输入管理员密码后，点击「登录数据管理」。")
-        st.stop()
-    st.success("管理员验证成功，可以上传业务数据。")
-    if st.button("退出数据管理"):
-        st.session_state.data_admin_authenticated = False
-        st.rerun()
     uploaded = st.file_uploader("上传 HTML 表格导出格式的 .xls / .html 文件", type=["xls", "html", "htm"])
     if uploaded is not None and st.button("确认导入并替换当前数据库", type="primary"):
         with tempfile.NamedTemporaryFile(suffix=".xls", delete=False) as tmp:
