@@ -79,6 +79,83 @@ def show_kpi_overview(df):
     st.dataframe(summary, hide_index=True, use_container_width=True)
     st.download_button("导出供应商考核参考汇总", summary.to_csv(index=False).encode("utf-8-sig"),
                        file_name="美国港后供应商KPI参考汇总.csv", mime="text/csv", key="kpi_summary_csv")
+    st.markdown("### 🏆 七项 KPI 正式评分（证据确认口径）")
+    st.caption("每项KPI得分 = 已确认达标单数 ÷ (已确认达标单数 + 已确认不达标单数) × 100。"
+               "免责与待核实不进入分母；样本不足显示未评分。七项等权综合分仅为管理参考，协议未约定权重。")
+    metrics = [r[0] for r in RULES]
+    template = pd.DataFrame({
+        "排柜单号": scoped["排柜单号"].repeat(len(metrics)).tolist(),
+        "KPI指标": metrics * len(scoped),
+        "考核结果": ["待核实"] * (len(scoped) * len(metrics)),
+        "证据说明": [""] * (len(scoped) * len(metrics)),
+    })
+    st.download_button("下载逐单KPI核实模板 CSV",
+                       template.to_csv(index=False).encode("utf-8-sig"),
+                       file_name="港后供应商KPI核实模板.csv", mime="text/csv",
+                       key="kpi_review_template")
+    uploaded_review = st.file_uploader(
+        "上传已核实的KPI结果 CSV（排柜单号、KPI指标、考核结果、证据说明）",
+        type=["csv"], key="kpi_review_upload")
+    review = template.iloc[0:0].copy()
+    if uploaded_review is not None:
+        try:
+            review = pd.read_csv(uploaded_review, dtype=str, encoding="utf-8-sig").fillna("")
+            required = {"排柜单号", "KPI指标", "考核结果", "证据说明"}
+            if not required.issubset(review.columns):
+                raise ValueError("缺少字段：" + "、".join(sorted(required - set(review.columns))))
+            review["排柜单号"] = review["排柜单号"].str.strip()
+            review["KPI指标"] = review["KPI指标"].str.strip()
+            review["考核结果"] = review["考核结果"].str.strip()
+            review = review[review["排柜单号"].isin(scoped["排柜单号"])].copy()
+            if not review["KPI指标"].isin(metrics).all():
+                raise ValueError("KPI指标存在协议未定义的名称")
+            if not review["考核结果"].isin(["达标", "不达标", "免责", "待核实"]).all():
+                raise ValueError("考核结果仅允许：达标、不达标、免责、待核实")
+            if review.duplicated(["排柜单号", "KPI指标"]).any():
+                raise ValueError("同一排柜单号和KPI指标存在重复审核结果")
+            if (review["考核结果"].isin(["达标", "不达标", "免责"])
+                & review["证据说明"].str.strip().eq("")).any():
+                raise ValueError("达标、不达标及免责必须填写证据说明")
+            st.success(f"已读取 {len(review):,} 条人工核实结果。本次上传仅用于当前页面计算，不写入业务数据库。")
+        except Exception as exc:
+            st.error(f"核实结果无法使用：{exc}")
+            review = template.iloc[0:0].copy()
+    base = scoped[["排柜单号", "区域", "供应商"]].drop_duplicates("排柜单号")
+    if not review.empty:
+        review = review.merge(base, on="排柜单号", how="inner")
+    score_rows = []
+    for (area, supplier), group in base.groupby(["区域", "供应商"]):
+        orders = set(group["排柜单号"])
+        reviewed = review[review["排柜单号"].isin(orders)] if not review.empty else review
+        row = {"区域": area, "港后供应商": supplier, "业务单量": len(orders)}
+        scores = []
+        for metric in metrics:
+            results = reviewed.loc[reviewed["KPI指标"].eq(metric), "考核结果"]
+            passed = int(results.eq("达标").sum())
+            failed = int(results.eq("不达标").sum())
+            denominator = passed + failed
+            score = round(100 * passed / denominator, 2) if denominator else None
+            row[metric + "得分%"] = score
+            row[metric + "有效样本"] = denominator
+            row[metric + "不达标"] = failed
+            row[metric + "待核实"] = len(orders) - denominator - int(results.eq("免责").sum())
+            if score is not None:
+                scores.append(score)
+        row["已评分指标数"] = len(scores)
+        row["综合参考分%"] = round(sum(scores) / len(scores), 2) if len(scores) == len(metrics) else None
+        score_rows.append(row)
+    score_table = pd.DataFrame(score_rows)
+    st.dataframe(score_table, hide_index=True, use_container_width=True)
+    st.download_button("导出七项KPI供应商评分表",
+                       score_table.to_csv(index=False).encode("utf-8-sig"),
+                       file_name="美国港后供应商七项KPI评分.csv",
+                       mime="text/csv", key="kpi_score_export")
+    if not review.empty:
+        st.markdown("#### 已核实业务记录")
+        st.dataframe(review, hide_index=True, use_container_width=True, height=350)
+    st.caption("本模块不依据日期异常直接判定不达标；核实文件中明确标注的达标、不达标、免责才参与最终评分。"
+               "未覆盖全部七项时不生成综合分，避免误导。")
+
     st.markdown("### 📑 协议 KPI 定义与证据要求")
     rules = pd.DataFrame(RULES, columns=["指标", "目标值", "协议考核定义", "违约责任", "所需证明"])
     rules["当前自动考核能力"] = [
