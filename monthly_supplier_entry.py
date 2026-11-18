@@ -285,43 +285,43 @@ def show_monthly_supplier_entry(df, user):
     tabs = st.tabs(SHEETS)
     for tab, metric in zip(tabs, SHEETS):
         with tab:
+            # The five-row summary already has an exact count for each metric.
+            total = int(summary.loc[
+                summary["指标"].eq(metric), "考核期间总记录数"].iloc[0])
+            page_size = 100
+            pages = max(1, (total + page_size - 1) // page_size)
+            page_key = f"kpi_page_{metric}"
+            # A filter change may reduce page count; clamp before widget creation.
+            if st.session_state.get(page_key, 1) > pages:
+                st.session_state[page_key] = 1
+            page = st.number_input(
+                "明细页码", min_value=1, max_value=pages, value=1, step=1,
+                key=page_key, disabled=pages == 1)
+            offset = (page - 1) * page_size
             if is_neon():
-                page_size = 100
-                page = st.number_input("明细页码", min_value=1, value=1, step=1,
-                                       key=f"kpi_page_{metric}")
                 with connect() as conn:
-                    count, part = neon_kpi.details(
+                    part = neon_kpi.detail_page(
                         conn, selected, metric, supplier_value, region_value,
-                        limit=page_size, offset=(page - 1) * page_size)
-                records = [json.loads(v) if isinstance(v, str) else v for v in part["payload"]]
-                detail = pd.DataFrame(records)
-                detail.insert(0, "序列号", range((page-1)*page_size+1, (page-1)*page_size+len(detail)+1))
-                detail.insert(1, "Excel原始行号", part["source_row"].tolist())
-                st.caption(f"匹配 {count:,} 条｜当前第 {page} 页｜每页 {page_size} 条")
-                st.dataframe(detail, hide_index=True, use_container_width=True, height=540)
-                if st.button("准备导出当前筛选的全部明细", key=f"kpi_prepare_export_{metric}"):
-                    with connect() as conn:
-                        _, all_rows = neon_kpi.details(
-                            conn, selected, metric, supplier_value, region_value,
-                            limit=count or 1, offset=0)
-                    exported = pd.DataFrame([
-                        json.loads(v) if isinstance(v, str) else v for v in all_rows["payload"]
-                    ])
-                    exported.insert(0, "Excel原始行号", all_rows["source_row"].tolist())
-                    st.download_button(
-                        "下载全部明细 CSV", exported.to_csv(index=False).encode("utf-8-sig"),
-                        file_name=f"{selected}_{metric}_美国筛选明细.csv",
-                        mime="text/csv", key=f"kpi_export_ready_{metric}")
+                        limit=page_size, offset=offset)
+                records = [json.loads(v) if isinstance(v, str) else v
+                           for v in part["payload"]]
             else:
-                part = visible_raw[visible_raw["metric"].eq(metric)]
-                records = [json.loads(v) for v in part["payload"]]
-                detail = pd.DataFrame(records)
-                detail.insert(0, "序列号", range(1, len(detail)+1))
-                detail.insert(1, "Excel原始行号", part["source_row"].tolist())
-                st.metric("有效明细记录" if metric == "送仓时效" else "全部原始记录", f"{len(detail):,}")
-                st.dataframe(detail, hide_index=True, use_container_width=True, height=540)
-                st.download_button("导出全部明细CSV",
-                    detail.to_csv(index=False).encode("utf-8-sig"),
-                    file_name=f"{selected}_{metric}_全球全部明细.csv",
-                    mime="text/csv", key=f"kpi_global_export_{metric}")
+                # SQLite fallback retains the existing in-memory monthly dataset,
+                # but renders and exports at most 100 rows per page.
+                part = visible_raw[visible_raw["metric"].eq(metric)].iloc[
+                    offset:offset + page_size]
+                records = [json.loads(v) if isinstance(v, str) else v
+                           for v in part["payload"]]
+            detail = pd.DataFrame(records)
+            detail.insert(0, "序列号", range(offset + 1, offset + len(detail) + 1))
+            detail.insert(1, "Excel原始行号", part["source_row"].tolist())
+            st.caption(
+                f"匹配 {total:,} 条｜第 {page} / {pages} 页｜"
+                f"显示 {len(detail)} 条（最多 100 条）")
+            st.dataframe(detail, hide_index=True, use_container_width=True, height=540)
+            st.download_button(
+                "导出当前页 CSV（最多100条）",
+                detail.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"{selected}_{metric}_第{page}页.csv",
+                mime="text/csv", key=f"kpi_global_export_{metric}")
     st.caption("当前数据后端：" + ("Neon PostgreSQL（云端持久化）" if is_neon() else "SQLite（本地临时存储）"))
