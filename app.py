@@ -16,6 +16,7 @@ from global_overview import show_global_overview, is_us_country
 from theme import apply_theme
 from auth import login_gate, manage_users, change_own_password
 from database_backup import show_database_backup
+from database_status import show_database_status
 
 st.set_page_config(page_title="司顺国际物流港后运营工作台", page_icon="🚢", layout="wide")
 apply_theme()
@@ -72,6 +73,7 @@ with st.sidebar:
     pages = ["运营总览", "全球港后运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "港后供应商KPI考核"]
     if user["role"] == "管理员":
         pages.append("数据管理")
+        pages.append("数据库连接状态")
         pages.append("业务主键质量检查")
     if user["role"] == "管理员":
         pages.append("用户管理")
@@ -84,6 +86,10 @@ with st.sidebar:
         st.session_state.pop("sqlite_backup_filename", None)
         st.rerun()
     st.caption("统计业务主键：排柜单号；供应商仅使用港后拖车行。")
+
+if page == "数据库连接状态":
+    show_database_status(user, DB)
+    st.stop()
 
 if page == "数据库备份中心":
     if is_neon():
@@ -141,7 +147,7 @@ if page == "数据管理":
         st.stop()
     st.subheader("业务数据管理")
     st.caption("Neon 模式下上传将更新云端 PostgreSQL；SQLite 模式下仍使用实例本地文件。")
-    if not os.path.exists(DB):
+    if not is_neon() and not os.path.exists(DB):
         st.info("尚未导入业务数据。请先上传源文件。")
     else:
         with db_connect(DB) as conn:
@@ -163,11 +169,11 @@ if page == "数据管理":
             os.unlink(path)
     st.stop()
 
-if not os.path.exists(DB):
+if not is_neon() and not os.path.exists(DB):
     st.warning("云端尚无业务数据库。请联系管理员在「数据管理」上传全球完整源文件。")
     st.stop()
 
-df = read_db(os.path.getmtime(DB))
+df = read_db("neon" if is_neon() else os.path.getmtime(DB))
 # All reporting uses 排柜单号 as the business key; 箱号 is allowed to repeat.
 order_keys = df["排柜单号"].fillna("").astype(str).str.strip()
 valid_orders = order_keys.ne("")
