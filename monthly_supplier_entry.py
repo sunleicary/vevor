@@ -29,7 +29,7 @@ def connect():
     conn.commit()
     return conn
 
-def parse_workbook(payload, year):
+def parse_workbook(payload, assessment_month):
     from openpyxl import load_workbook
     book = load_workbook(BytesIO(payload), read_only=True, data_only=True)
     if any(sheet not in book.sheetnames for sheet in SHEETS):
@@ -62,7 +62,9 @@ def parse_workbook(payload, year):
                 if m<1 or m>12:continue
             except (ValueError,TypeError):
                 continue
-            month=f"{year}-{m:02d}"
+            month=assessment_month
+            if m != int(assessment_month[-2:]):
+                raise ValueError(f"{metric} 的源文件月份 {m} 与所选考核月份 {assessment_month} 不一致，请核对。")
             months.add(month)
             status=get(row,status_col)
             overdue=get(row,"超时天数") or get(row,"超LFD天数")
@@ -88,11 +90,12 @@ def show_monthly_supplier_entry(df, user):
     if user.get("role")=="管理员":
         with st.expander("统一导入月度KPI文件",expanded=batches.empty):
             uploaded=st.file_uploader("上传国际物流服务商KPI工作簿",type=["xlsx"],key="kpi_unified_upload")
-            year=st.number_input("考核年份（Excel月份字段只有月份数字）",min_value=2020,max_value=2100,
-                                 value=2026,step=1,key="kpi_import_year")
+            assessment_month=st.selectbox("考核月份",
+                [f"{y}-{m:02d}" for y in range(2024, 2036) for m in range(1,13)],
+                index=(2026-2024)*12+9, key="kpi_import_month")
             if st.button("解析并保存五项KPI明细",disabled=uploaded is None,type="primary"):
                 try:
-                    rows,months=parse_workbook(uploaded.getvalue(),int(year))
+                    rows,months=parse_workbook(uploaded.getvalue(),assessment_month)
                     # Verify uniqueness before changing any stored data.
                     keys=[(r[0],r[1],r[2]) for r in rows]
                     if len(keys)!=len(set(keys)):
