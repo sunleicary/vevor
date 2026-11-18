@@ -43,7 +43,7 @@ def region_options(conn, month, supplier=None):
 # numbers as unknown. Keep the regex conservative and explicit.
 # IMPORTANT: db_backend._translate replaces every '?' with '%s'.
 # Keep '?' out of SQL regex literals to avoid accidental psycopg placeholders.
-NUMERIC_RE = r'^[+-]{0,1}([0-9]+(\.[0-9]*){0,1}|\.[0-9]+)([eE][+-]{0,1}[0-9]+){0,1}
+NUMERIC_RE = r'^[+-]{0,1}([0-9]+(\\.[0-9]*){0,1}|\\.[0-9]+)([eE][+-]{0,1}[0-9]+){0,1}$'
 def number(field):
     clean = f"replace(btrim(coalesce(payload::jsonb ->> '{field}','')), ',', '')"
     return f"""(CASE WHEN {clean} ~ '{NUMERIC_RE}'
