@@ -4,6 +4,7 @@ import hmac
 import os
 import secrets
 import sqlite3
+from db_backend import connect as db_connect, is_neon
 from datetime import datetime, timezone
 
 import streamlit as st
@@ -13,19 +14,19 @@ ROLES = ("管理员", "运营人员", "只读用户")
 
 
 def _connect():
-    conn = sqlite3.connect(AUTH_DB, timeout=15)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=15000")
-    conn.execute("""CREATE TABLE IF NOT EXISTS users (
-        username TEXT PRIMARY KEY COLLATE NOCASE,
-        salt TEXT NOT NULL,
-        password_hash TEXT NOT NULL,
-        role TEXT NOT NULL,
-        enabled INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )""")
-    conn.commit()
+    conn = db_connect(AUTH_DB, timeout=15)
+    if not is_neon():
+        conn.execute("PRAGMA busy_timeout=15000")
+        conn.execute("""CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY COLLATE NOCASE,
+            salt TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""")
+        conn.commit()
     return conn
 
 
@@ -109,7 +110,7 @@ def manage_users(user):
         st.error("仅管理员可访问用户管理。")
         return
     st.subheader("👥 用户管理")
-    st.caption("账号信息保存在独立的 users.db 中；Streamlit Cloud 本地文件不保证持久保存。生产环境请使用持久化数据库。")
+    st.caption("账号信息存储于当前数据库后端（Neon 或 SQLite）。")
     with _connect() as conn:
         rows = conn.execute("SELECT username, role, enabled, created_at FROM users ORDER BY username").fetchall()
     st.dataframe([{"用户名": r["username"], "角色": r["role"],
@@ -137,7 +138,7 @@ def manage_users(user):
                                      (username, salt, digest, role, 1, now, now))
                     st.success("用户已创建。")
                     st.rerun()
-                except sqlite3.IntegrityError:
+                except (sqlite3.IntegrityError, __import__("psycopg").errors.UniqueViolation):
                     st.error("用户名已存在。")
     with st.expander("🛠️ 修改账号 / 重置密码"):
         selected = st.selectbox("选择账号", [r["username"] for r in rows])

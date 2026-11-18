@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from db_backend import connect as db_connect, read_sql, is_neon
 import tempfile
 from datetime import date, timedelta
 
@@ -25,10 +26,10 @@ st.markdown("""<div class="vevor-topbar">
   <div class="vevor-tag">数据驱动 · 异常预警 · 高效提柜</div>
 </div><div class="vevor-subtitle">全球国家业务分析 + 美国六大区域运营 · 仅按港后拖车行统计 · 数据非实时码头状态</div>""",unsafe_allow_html=True)
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=60)
 def read_db(mtime):
-    with sqlite3.connect(DB) as conn:
-        return pd.read_sql_query("SELECT * FROM containers", conn)
+    with db_connect(DB) as conn:
+        return read_sql("SELECT * FROM containers", conn)
 
 def region(value):
     s = str(value).lower()
@@ -85,7 +86,10 @@ with st.sidebar:
     st.caption("统计业务主键：排柜单号；供应商仅使用港后拖车行。")
 
 if page == "数据库备份中心":
-    show_database_backup(user)
+    if is_neon():
+        st.info("当前使用 Neon PostgreSQL。此页面仅支持 SQLite 快照备份；请使用 Neon 的备份或导出功能。")
+    else:
+        show_database_backup(user)
     st.stop()
 
 if page == "用户管理":
@@ -101,10 +105,10 @@ if page == "业务主键质量检查":
     if user["role"] != "管理员":
         st.error("仅管理员可查看数据质量检查。")
         st.stop()
-    if not os.path.exists(DB):
+    if not is_neon() and not os.path.exists(DB):
         st.info("尚无业务数据。")
         st.stop()
-    raw = read_db(os.path.getmtime(DB))
+    raw = read_db("neon" if is_neon() else os.path.getmtime(DB))
     keys = raw["排柜单号"].fillna("").astype(str).str.strip()
     missing = keys.eq("")
     duplicated = keys.ne("") & keys.duplicated(keep=False)
@@ -136,11 +140,11 @@ if page == "数据管理":
         st.error("权限不足：仅管理员可访问数据管理及上传业务数据。")
         st.stop()
     st.subheader("业务数据管理")
-    st.caption("上传文件仅保存在当前 Streamlit 实例中；免费云端本地数据库不保证持久保存。")
+    st.caption("Neon 模式下上传将更新云端 PostgreSQL；SQLite 模式下仍使用实例本地文件。")
     if not os.path.exists(DB):
         st.info("尚未导入业务数据。请先上传源文件。")
     else:
-        with sqlite3.connect(DB) as conn:
+        with db_connect(DB) as conn:
             st.metric("当前数据库记录数", conn.execute("SELECT COUNT(*) FROM containers").fetchone()[0])
     uploaded = st.file_uploader("上传 HTML 表格导出格式的 .xls / .html 文件", type=["xls", "html", "htm"])
     if uploaded is not None and st.button("确认导入并替换当前数据库", type="primary"):

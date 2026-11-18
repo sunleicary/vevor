@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from db_backend import connect as db_connect, is_neon
 import sys
 from lxml import etree
 
@@ -73,7 +74,28 @@ def load(path):
         os.remove(temp_db)
         raise
     conn.close()
-    os.replace(temp_db, DB)
+    if is_neon():
+        # Parse/validate fully before touching the existing production table.
+        # The DELETE + INSERT are one transaction; errors restore the old dataset.
+        from psycopg import sql
+        try:
+            with sqlite3.connect(temp_db) as source:
+                source.row_factory = sqlite3.Row
+                with db_connect(DB) as target:
+                    target.execute("DELETE FROM containers")
+                    quoted = ", ".join('"' + c.replace('"', '""') + '"' for c in FIELDS)
+                    statement = "INSERT INTO containers (id, " + quoted + ") VALUES (" + ",".join(["?"] * (len(FIELDS) + 1)) + ")"
+                    cursor = source.execute("SELECT * FROM containers ORDER BY id")
+                    while True:
+                        chunk = cursor.fetchmany(500)
+                        if not chunk:
+                            break
+                        target.executemany(statement, [tuple(row) for row in chunk])
+        finally:
+            if os.path.exists(temp_db):
+                os.remove(temp_db)
+    else:
+        os.replace(temp_db, DB)
     print("Imported global records:", count)
 
 if __name__ == "__main__":
