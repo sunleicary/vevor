@@ -252,8 +252,7 @@ elif page == "运营总览":
                         plot = vendor_alerts.set_index("港后供应商")[
                             ["LFD已过待核实", "LFD三天内", "提箱晚于LFD"]]
                         st.bar_chart(plot, horizontal=True,
-                                     height=max(260, min(650, len(plot) * 32)),
-                                     key=f"overview_vendor_lfd_chart_{i}")
+                                     height=max(260, min(650, len(plot) * 32)))
                         with st.expander("🔎 按供应商查看 LFD 预警货柜明细", expanded=False):
                             suppliers = vendor_alerts.loc[
                                 vendor_alerts["预警合计"] > 0, "港后供应商"].tolist()
