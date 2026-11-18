@@ -10,6 +10,7 @@ from container_detail import show_container_detail
 from supplier_overview import show_supplier_overview
 from kpi_overview import show_kpi_overview
 from monthly_kpi import show_monthly_kpi
+from supplier_kpi_store import show_supplier_kpi
 from global_overview import show_global_overview, is_us_country
 from theme import apply_theme
 from auth import login_gate, manage_users, change_own_password
@@ -42,7 +43,7 @@ def region(value):
 
 def grid(data, key="default"):
     columns = ["排柜单号", "箱号", "柜号显示", "区域", "目的仓", "船公司", "实际船名", "实际航次",
-               "ETA日期", "ATA日期", "港后拖车行", "LFD", "进口实际提箱时间",
+               "ETA日期", "ATA日期", "港后拖车行", "LFD", "进口实际提箱时间", "预计还柜时间",
                "实际送仓时间", "实际还柜日期", "风险"]
     # Some pages pass raw database rows without the derived display column.
     # Build it locally so every report can reuse this detail table safely.
@@ -54,7 +55,7 @@ def grid(data, key="default"):
     for field in columns:
         if field not in data.columns:
             data[field] = ""
-    visible = data[columns].rename(columns={"柜号显示": "显示柜号"})
+    visible = data[columns].rename(columns={"柜号显示": "显示柜号", "LFD": "提柜LFD", "预计还柜时间": "还柜LFD"})
     st.dataframe(visible, hide_index=True, use_container_width=True, height=450)
     st.download_button("导出当前结果 CSV",
                        visible.to_csv(index=False).encode("utf-8-sig"),
@@ -66,7 +67,7 @@ user = login_gate()
 with st.sidebar:
     st.markdown('<div class="vevor-sidebar-logo">VEVOR®<span>全球港后运营管理</span></div>', unsafe_allow_html=True)
     st.caption(f'当前用户：{user["username"]} · {user["role"]}')
-    pages = ["运营总览", "全球港后运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "港后供应商KPI考核", "月度KPI考核导入"]
+    pages = ["运营总览", "全球港后运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "港后供应商KPI考核", "月度KPI考核导入", "供应商月度KPI评分与补录"]
     if user["role"] == "管理员":
         pages.append("数据管理")
         pages.append("业务主键质量检查")
@@ -200,7 +201,9 @@ q.loc[lfd.notna() & pickup.notna() & (pickup.dt.normalize() > lfd.dt.normalize()
 q.loc[lfd.notna() & pickup.notna() & (pickup.dt.normalize() <= lfd.dt.normalize()), "风险"] = "已按LFD提箱"
 q["柜号显示"] = q["箱号"].replace("", pd.NA).fillna(q["排柜单号"])
 
-if page == "月度KPI考核导入":
+if page == "供应商月度KPI评分与补录":
+    show_supplier_kpi(df, user)
+elif page == "月度KPI考核导入":
     show_monthly_kpi()
 elif page == "港后供应商KPI考核":
     show_kpi_overview(df)
