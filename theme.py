@@ -58,15 +58,15 @@ div[class*=\"st-key-overview_metric_\"] button:hover p {color:#f04e16!important}
 [data-testid="stSidebar"] [data-testid="stDateInput"] [data-baseweb="input"] > div,
 [data-testid="stSidebar"] [data-testid="stDateInput"] input {
   background-color:#fff!important;
-  color:#06459a!important;
-  -webkit-text-fill-color:#06459a!important;
+  color:#8B0000!important;
+  -webkit-text-fill-color:#8B0000!important;
   font-weight:800!important;
 }
 [data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] [role="combobox"] *,
 [data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] [role="combobox"] span,
 [data-testid="stSidebar"] [data-testid="stDateInput"] input::placeholder {
-  color:#06459a!important;
-  -webkit-text-fill-color:#06459a!important;
+  color:#8B0000!important;
+  -webkit-text-fill-color:#8B0000!important;
   font-weight:800!important;
 }
 </style>"""
