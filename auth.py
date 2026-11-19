@@ -12,7 +12,7 @@ import psycopg
 import streamlit as st
 
 AUTH_DB = os.environ.get("AUTH_DB_PATH", os.path.join(os.path.dirname(__file__), "users.db"))
-ROLES = ("管理员", "运营人员", "只读用户")
+ROLES = ("系统管理员", "运营人员", "只读用户")
 
 
 def _connect():
@@ -54,7 +54,7 @@ def bootstrap():
         salt, digest = _new_password(initial)
         now = datetime.now(timezone.utc).isoformat()
         conn.execute("INSERT INTO users VALUES (?,?,?,?,?,?,?)",
-                     ("admin", salt, digest, "管理员", 1, now, now))
+                     ("admin", salt, digest, "系统管理员", 1, now, now))
     return True
 
 
@@ -124,7 +124,7 @@ def _verified_user(username):
 
 
 def manage_users(user):
-    if user["role"] != "管理员":
+    if user["role"] != "系统管理员":
         st.error("仅管理员可访问用户管理。")
         return
     st.subheader("👥 用户管理")
@@ -203,7 +203,7 @@ def manage_users(user):
         if save:
             if new_password and len(new_password) < 12:
                 st.error("新密码至少12位。")
-            elif selected.lower() == user["username"].lower() and (not enabled or new_role != "管理员"):
+            elif selected.lower() == user["username"].lower() and (not enabled or new_role != "系统管理员"):
                 st.error("不能停用自己或取消自己的管理员权限。")
             else:
                 try:
