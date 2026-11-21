@@ -89,6 +89,22 @@ color:#0b2b5f!important;-webkit-text-fill-color:#0b2b5f!important;opacity:1!impo
 [data-testid="stSidebar"] [class*="st-key-gtms_filter_region"] [data-testid="stWidgetLabel"] p,
 [data-testid="stSidebar"] [class*="st-key-gtms_filter_supplier"] [data-testid="stWidgetLabel"] p {
 color:#ffdf45!important;-webkit-text-fill-color:#ffdf45!important;font-weight:800!important}
+/* Sidebar navigation only: readable white menu text on navy; preserve filter inputs. */
+[data-testid="stSidebar"] [data-testid="stRadio"] > label,
+[data-testid="stSidebar"] [data-testid="stRadio"] > label *,
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label,
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label p,
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label span {
+  color:#f4f8ff!important;
+  -webkit-text-fill-color:#f4f8ff!important;
+  font-weight:650!important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p,
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) span {
+  color:#ffffff!important;
+  -webkit-text-fill-color:#ffffff!important;
+  font-weight:800!important;
+}
 </style>"""
 
 def apply_theme():
