@@ -220,10 +220,10 @@ with st.sidebar:
     eta_enabled = st.checkbox("启用 ETA 范围筛选", value=True, key="gtms_filter_eta_enabled")
     eta_range = None
     if eta_enabled:
-        first_this_month = date.today().replace(day=1)
-        start_default = (first_this_month - timedelta(days=1)).replace(day=1)
-        next_month_start = (first_this_month.replace(day=28) + timedelta(days=4)).replace(day=1)
-        end_default = (next_month_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        today = date.today()
+        start_default = today - timedelta(days=7)
+        first_next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
+        end_default = (first_next_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
         eta_range = st.date_input("ETA范围（含起止日）", value=(start_default, end_default),
                                   key="gtms_filter_eta_range")
 df = scope.copy()
