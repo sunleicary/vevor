@@ -188,26 +188,62 @@ df = df.drop_duplicates(subset=["排柜单号"], keep="last").copy()
 df["区域"] = df["目的仓物流区域"].fillna("").map(region)
 for col in ["ETA日期", "ATA日期", "LFD", "进口实际提箱时间", "实际送仓时间", "实际还柜日期"]:
     df[col + "_dt"] = pd.to_datetime(df[col], errors="coerce", format="mixed")
+# Shared operational filters synchronized from VevorGTMS.
+with st.sidebar:
+    st.markdown("### 运营数据筛选")
+    us_mask = df["目的仓国家"].map(is_us_country)
+    country_names = df["目的仓国家"].fillna("").astype(str).str.strip()
+    df["运营区域选项"] = df["区域"]
+    non_us = ~us_mask
+    df.loc[non_us, "运营区域选项"] = (
+        country_names.loc[non_us].replace("", "国家未填写")
+        + " / " + df.loc[non_us, "目的仓物流区域"].fillna("区域未填写").astype(str)
+    )
+    region_options = ["美国所有区域", "全球所有区域"] + sorted(
+        set(df["运营区域选项"].dropna().tolist()) - {"美国所有区域", "全球所有区域"}
+    )
+    selected_region = st.selectbox("运营区域", region_options, key="gtms_filter_region")
+    if selected_region == "美国所有区域":
+        scope = df.loc[us_mask]
+    elif selected_region == "全球所有区域":
+        scope = df
+    else:
+        scope = df.loc[df["运营区域选项"].eq(selected_region)]
+    supplier_options = sorted(
+        v for v in scope["港后拖车行"].fillna("").astype(str).str.strip().unique()
+        if v and v.casefold() not in ("nan", "none", "null")
+    )
+    supplier_choices = ["美国所有拖车商" if selected_region == "美国所有区域" else "全部拖车商"] + supplier_options
+    if st.session_state.get("gtms_filter_supplier") not in supplier_choices:
+        st.session_state["gtms_filter_supplier"] = supplier_choices[0]
+    selected_supplier = st.selectbox("港后拖车商", supplier_choices, key="gtms_filter_supplier")
+    eta_enabled = st.checkbox("启用 ETA 范围筛选", value=True, key="gtms_filter_eta_enabled")
+    eta_range = None
+    if eta_enabled:
+        first_this_month = date.today().replace(day=1)
+        start_default = (first_this_month - timedelta(days=1)).replace(day=1)
+        next_month_start = (first_this_month.replace(day=28) + timedelta(days=4)).replace(day=1)
+        end_default = (next_month_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        eta_range = st.date_input("ETA范围（含起止日）", value=(start_default, end_default),
+                                  key="gtms_filter_eta_range")
+df = scope.copy()
+if selected_supplier not in ("美国所有拖车商", "全部拖车商"):
+    df = df[df["港后拖车行"].fillna("").astype(str).str.strip().eq(selected_supplier)].copy()
+if eta_enabled:
+    if eta_range is not None and len(eta_range) == 2:
+        df = df[df["ETA日期_dt"].dt.date.between(eta_range[0], eta_range[1])].copy()
+    else:
+        st.info("请选择完整的 ETA 起止日期。")
+        st.stop()
+st.caption(f"当前运营筛选：{selected_region} · {selected_supplier} · "
+           + (f"ETA {eta_range[0]} 至 {eta_range[1]}" if eta_enabled and eta_range and len(eta_range)==2 else "ETA不限")
+           + f" · {len(df):,} 条业务记录")
 if page == "全球港后运营总览":
     show_global_overview(df)
     st.stop()
-
-# Existing US operations pages must not include newly imported non-US records.
+# Legacy US-specific reports remain US-only, even with global sidebar selection.
 df = df[df["目的仓国家"].map(is_us_country)].copy()
-
-with st.sidebar:
-    regions = sorted(df["区域"].unique())
-    selected = st.multiselect("运营区域", regions, default=regions)
-    carriers = sorted(df["港后拖车行"].dropna().astype(str).loc[lambda s: s.str.strip().ne("")].unique())
-    carrier = st.selectbox("港后拖车商", ["全部"] + carriers)
-    eta_range = st.date_input("ETA范围", value=(date.today()-timedelta(days=30), date.today()+timedelta(days=60)))
-
-q = df[df["区域"].isin(selected)].copy()
-if carrier != "全部":
-    q = q[q["港后拖车行"] == carrier]
-if len(eta_range) == 2:
-    q = q[q["ETA日期_dt"].between(pd.Timestamp(eta_range[0]),
-        pd.Timestamp(eta_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1))]
+q = df.copy()
 
 today = pd.Timestamp(date.today())
 lfd, pickup = q["LFD_dt"], q["进口实际提箱时间_dt"]
@@ -231,7 +267,7 @@ elif page == "运营总览":
         with tab:
             z = q if name is None else q[q["区域"] == name]
             st.subheader(name or "美国港后运营总览")
-            if len(eta_range) == 2:
+            if eta_enabled and eta_range is not None and len(eta_range) == 2:
                 st.markdown(
                     f'<div style="display:inline-flex;align-items:center;gap:9px;'
                     f'background:#e8f2ff;border:1px solid #bdd5fa;border-left:4px solid #ff5a19;'
