@@ -188,6 +188,10 @@ df = df.drop_duplicates(subset=["排柜单号"], keep="last").copy()
 df["区域"] = df["目的仓物流区域"].fillna("").map(region)
 for col in ["ETA日期", "ATA日期", "LFD", "进口实际提箱时间", "实际送仓时间", "实际还柜日期"]:
     df[col + "_dt"] = pd.to_datetime(df[col], errors="coerce", format="mixed")
+if "目的港预计卸柜时间" not in df.columns:
+    st.warning("当前数据库尚未保存目的港预计卸柜时间，请重新导入完整源表以启用 ETA 缺失补充。")
+    df["目的港预计卸柜时间"] = ""
+df["统计日期_dt"] = df["ETA日期_dt"].fillna(pd.to_datetime(df["目的港预计卸柜时间"], errors="coerce", format="mixed"))
 # Shared operational filters synchronized from VevorGTMS.
 with st.sidebar:
     st.markdown("### 运营数据筛选")
@@ -220,10 +224,9 @@ with st.sidebar:
     eta_enabled = st.checkbox("启用 ETA 范围筛选", value=True, key="gtms_filter_eta_enabled")
     eta_range = None
     if eta_enabled:
-        today = date.today()
-        start_default = today - timedelta(days=7)
-        first_next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
-        end_default = (first_next_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        today_filter = date.today()
+        start_default = today_filter - timedelta(days=14)
+        end_default = today_filter + timedelta(days=14)
         eta_range = st.date_input("ETA范围（含起止日）", value=(start_default, end_default),
                                   key="gtms_filter_eta_range")
 df = scope.copy()
@@ -231,10 +234,11 @@ if selected_supplier not in ("美国所有拖车商", "全部拖车商"):
     df = df[df["港后拖车行"].fillna("").astype(str).str.strip().eq(selected_supplier)].copy()
 if eta_enabled:
     if eta_range is not None and len(eta_range) == 2:
-        df = df[df["ETA日期_dt"].dt.date.between(eta_range[0], eta_range[1])].copy()
+        df = df[df["统计日期_dt"].dt.date.between(eta_range[0], eta_range[1])].copy()
     else:
         st.info("请选择完整的 ETA 起止日期。")
         st.stop()
+st.caption("统计日期：ETA优先，缺失取目的港预计卸柜时间；已到港/站以目的港/站卸柜日期为准。")
 st.caption(f"当前运营筛选：{selected_region} · {selected_supplier} · "
            + (f"ETA {eta_range[0]} 至 {eta_range[1]}" if eta_enabled and eta_range and len(eta_range)==2 else "ETA不限")
            + f" · {len(df):,} 条业务记录")
@@ -274,25 +278,25 @@ elif page == "运营总览":
                     f'border-radius:8px;padding:7px 13px;margin:0 0 12px 0;'
                     f'color:#09275d;font-weight:700;font-size:.91rem">'
                     f'📅 ETA 统计窗口：{eta_range[0]:%Y/%m/%d} — {eta_range[1]:%Y/%m/%d}'
-                    f' <span style="font-weight:400;color:#4b6a9b">｜按预计到港日期统计 · 随左侧筛选同步更新</span>'
+                    f' <span style="font-weight:400;color:#4b6a9b">｜ETA优先，缺失取预计卸柜时间 · 随左侧筛选同步更新</span>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
             else:
                 st.caption("ETA 统计窗口：请选择完整的开始和结束日期")
-            arrived = z["ATA日期_dt"].notna()
+            arrived = pd.to_datetime(z["目的港/站卸柜日期"], errors="coerce", format="mixed").notna()
             picked = z["进口实际提箱时间_dt"].notna()
             delivered = z["实际送仓时间_dt"].notna()
             returned = z["实际还柜日期_dt"].notna()
             metric_masks = [
                 ("货柜记录", pd.Series(True, index=z.index)),
-                ("已到港", arrived),
+                ("已到港/站", arrived),
                 ("LFD已过待核实", z["风险"].eq("LFD已过/提箱待核实")),
                 ("已提柜", picked),
                 ("已送仓", delivered),
                 ("已还空", returned),
                 ("LFD三天内", z["风险"].eq("LFD 3天内")),
-                ("到港未记录提柜", arrived & ~picked),
+                ("到港/站未记录提柜", arrived & ~picked),
             ]
             selected_metric_key = f"overview_selected_metric_{i}"
             for metric_idx, (col, (label, mask)) in enumerate(zip(st.columns(8), metric_masks)):
