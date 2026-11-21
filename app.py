@@ -373,7 +373,7 @@ elif page == "运营总览":
                             details = details.sort_values("LFD_dt", na_position="last")
                             st.caption(f"符合条件 {len(details):,} 柜")
                             grid(details, key=f"overview_vendor_lfd_detail_{i}")
-                    if carrier != "全部":
+                    if selected_supplier not in ("美国所有拖车商", "全部拖车商"):
                         st.caption("左侧已筛选单个港后拖车商；切换为「全部」可比较该区域所有供应商。")
 
             st.markdown("### 📊 区域业务与拖车商分配")
@@ -443,7 +443,7 @@ elif page == "运营总览":
                             "view": {"stroke": None},
                         }, use_container_width=True, key=f"overview_supplier_share_{i}")
                         st.caption("色块显示柜量与占比；占比不足13%的色块请悬停查看，避免标签重叠。")
-                        if carrier != "全部":
+                        if selected_supplier not in ("美国所有拖车商", "全部拖车商"):
                             st.caption("当前已筛选单个拖车商；选择左侧「全部」查看完整供应商占比。")
             if not z.empty:
                 with st.expander("🔎 区域柜量及港后拖车商占比 · 条件查询", expanded=True):
