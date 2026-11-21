@@ -10,7 +10,7 @@ h1,h2,h3,h4,h5 {color:#09275d;letter-spacing:-.025em}
 h3 {font-weight:800}
 [data-testid=\"stSidebar\"] {background:linear-gradient(180deg,#08275a 0%,#041934 100%);border-right:2px solid #163e79}
 [data-testid=\"stSidebar\"] [data-testid=\"stSidebarContent\"] {padding-top:1.1rem}
-[data-testid=\"stSidebar\"] * {color:#e8f2ff}
+[data-testid=\"stSidebar\"] {color:#e8f2ff}
 [data-testid=\"stSidebar\"] [role=\"radiogroup\"] {gap:.28rem}
 [data-testid=\"stSidebar\"] [role=\"radiogroup\"] label {padding:.56rem .65rem;border-radius:10px;transition:background .15s ease}
 [data-testid=\"stSidebar\"] [role=\"radiogroup\"] label:has(input:checked) {background:linear-gradient(100deg,#ff6a1c,#f04411);box-shadow:0 4px 14px #ff5a2038}
@@ -69,6 +69,26 @@ div[class*=\"st-key-overview_metric_\"] button:hover p {color:#f04e16!important}
   -webkit-text-fill-color:#8B0000!important;
   font-weight:800!important;
 }
+
+/* Operational filter widgets: white input, dark navy selected values. */
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"],
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [data-testid="stDateInput"] [data-baseweb="input"],
+[data-testid="stSidebar"] [data-testid="stDateInput"] [data-baseweb="input"] > div {background:#fff!important}
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] *,
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="combobox"],
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="combobox"] *,
+[data-testid="stSidebar"] [data-testid="stDateInput"] input,
+[data-testid="stSidebar"] [data-testid="stDateInput"] [data-baseweb="input"] * {
+color:#0b2b5f!important;-webkit-text-fill-color:#0b2b5f!important;opacity:1!important;font-weight:800!important}
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] svg {color:#0b2b5f!important;fill:#0b2b5f!important}
+[data-testid="stSidebar"] [data-testid="stDateInput"] label p,
+[data-testid="stSidebar"] [data-testid="stDateInput"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] [class*="st-key-gtms_filter_region"] label p,
+[data-testid="stSidebar"] [class*="st-key-gtms_filter_supplier"] label p,
+[data-testid="stSidebar"] [class*="st-key-gtms_filter_region"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] [class*="st-key-gtms_filter_supplier"] [data-testid="stWidgetLabel"] p {
+color:#ffdf45!important;-webkit-text-fill-color:#ffdf45!important;font-weight:800!important}
 </style>"""
 
 def apply_theme():
