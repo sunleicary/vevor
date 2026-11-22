@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 from import_data import DB, load
 from container_detail import show_container_detail
+from arrival_workbench import show_arrival_workbench
 from supplier_overview import show_supplier_overview
 from kpi_overview import show_kpi_overview
 from monthly_kpi import show_monthly_kpi
@@ -70,7 +71,7 @@ user = login_gate()
 with st.sidebar:
     st.markdown('<div class="vevor-sidebar-logo">VEVOR®<span>全球港后运营管理</span></div>', unsafe_allow_html=True)
     st.caption(f'当前用户：{user["username"]} · {user["role"]}')
-    pages = ["运营总览", "全球港后运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "港后供应商KPI考核"]
+    pages = ["运营总览", "港口与铁路到站动态监控中心", "全球港后运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "港后供应商KPI考核"]
     if user["role"] == "系统管理员":
         pages.append("数据管理")
         pages.append("数据库连接状态")
@@ -234,6 +235,9 @@ with st.sidebar:
 df = scope.copy()
 if selected_supplier not in ("美国所有拖车商", "全部拖车商"):
     df = df[df["港后拖车行"].fillna("").astype(str).str.strip().eq(selected_supplier)].copy()
+if page == "港口与铁路到站动态监控中心":
+    show_arrival_workbench(df, eta_range=eta_range, eta_enabled=eta_enabled)
+    st.stop()
 if eta_enabled:
     if eta_range is not None and len(eta_range) == 2:
         df = df[df["统计日期_dt"].dt.date.between(eta_range[0], eta_range[1])].copy()
