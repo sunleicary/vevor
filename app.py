@@ -8,25 +8,30 @@ import pandas as pd
 import streamlit as st
 from import_data import DB, load
 from container_detail import show_container_detail
-from arrival_workbench import show_arrival_workbench
 from supplier_overview import show_supplier_overview
 from kpi_overview import show_kpi_overview
 from monthly_kpi import show_monthly_kpi
 from monthly_supplier_entry import show_monthly_supplier_entry
 from global_overview import show_global_overview, is_us_country
 from theme import apply_theme
-from auth import login_gate, manage_users, change_own_password
+from auth import login_gate, manage_users, change_own_password, manage_roles, permitted_modules, is_admin
 from database_backup import show_database_backup
 from database_status import show_database_status
+from drayage_suppliers import show_drayage_suppliers
+from country_regions import show_country_regions
+from global_ports_terminals import show_global_ports_terminals
+from shipping_lines import show_shipping_lines
+from customs_brokers import show_customs_brokers
+from warehouses import show_warehouses
+from drayage_master import show_drayage_master
+from postport_do_assignment import show_do_assignment
+from contract_rates import show_contract_rates
+from logistics_ai import show_logistics_ai
+from arrival_workbench import show_arrival_workbench
+from intelligent_operations import show_intelligent_lfd, show_ai_fee_review, show_supplier_capacity
 
 st.set_page_config(page_title="司顺国际物流港后运营工作台", page_icon="🚢", layout="wide")
 apply_theme()
-st.markdown("""<div class="vevor-topbar">
-  <div class="vevor-logo">VEVOR®</div>
-  <div class="vevor-divider"></div>
-  <div class="vevor-title">国际物流港后运营工作台 <span style="font-weight:500">|</span> 全球港后运营管理</div>
-  <div class="vevor-tag">数据驱动 · 异常预警 · 高效提柜</div>
-</div><div class="vevor-subtitle">全球国家业务分析 + 美国六大区域运营 · 仅按港后拖车行统计 · 数据非实时码头状态</div>""",unsafe_allow_html=True)
 
 @st.cache_data(show_spinner=False, ttl=60)
 def read_db(mtime):
@@ -69,24 +74,145 @@ def grid(data, key="default"):
 user = login_gate()
 
 with st.sidebar:
-    st.markdown('<div class="vevor-sidebar-logo">VEVOR®<span>全球港后运营管理</span></div>', unsafe_allow_html=True)
-    st.caption(f'当前用户：{user["username"]} · {user["role"]}')
-    pages = ["运营总览", "港口与铁路到站动态监控中心", "全球港后运营总览", "全美港后供应商总览", "货柜查询", "货柜详情", "LFD预警", "拖车商分析", "港后供应商KPI考核"]
-    if user["role"] == "系统管理员":
-        pages.append("数据管理")
-        pages.append("数据库连接状态")
-        pages.append("业务主键质量检查")
-    if user["role"] == "系统管理员":
-        pages.append("用户管理")
-        pages.append("数据库备份中心")
-    pages.append("我的账号")
-    page = st.radio("业务模块", pages)
-    if st.button("退出登录", key="logout_user"):
+    st.markdown('<div class="vevor-sidebar-logo">VEVOR®</div>', unsafe_allow_html=True)
+    st.caption(f'{user["username"]} · {user["role"]}')
+    # Five business domains; labels are kept separate from legacy handlers.
+    navigation = {
+        "港后运营管理": [
+            "港后运营工作台", "港口与铁路到站动态监控中心", "货柜详细信息查询", "物流AI助理", "港后拖车商DO分配", "港后LFD智能预警管理",
+            "港后供应商产能与计划管理", "港后供应商绩效KPI管理",
+        ],
+        "港后拖车行结算管理": [
+            "拖车行合同管理", "拖车行异常费用管理", "账期与费用结算管理",
+        ],
+        "企业主数据管理": [
+            "全球国家与业务区域管理", "全球港口与码头管理",
+            "船司管理", "清关行管理", "海外仓主数据管理", "拖车行主数据管理",
+        ],
+        "权限管理": ["角色管理", "用户管理"],
+        "系统管理": ["系统数据备份", "业务数据导入管理", "数据库连接状态管理"],
+    }
+    allowed_modules = permitted_modules(user)
+    visible_domains = [domain for domain in navigation if any(item in allowed_modules for item in navigation[domain])]
+    # Tree navigation: expand/collapse first-level groups and click child pages.
+    icons = {
+        "港后运营管理": "01", "港后拖车行结算管理": "02",
+        "企业主数据管理": "03", "权限管理": "04",
+        "系统管理": "05",
+    }
+    available_modules = [item for group in visible_domains for item in navigation[group] if item in allowed_modules]
+    if not available_modules:
+        st.warning("当前角色尚未开放业务页面，请联系系统管理员授权。")
+        st.stop()
+    if st.session_state.get("gtms_active_module") not in available_modules:
+        st.session_state["gtms_active_module"] = "港口与铁路到站动态监控中心" if "港口与铁路到站动态监控中心" in available_modules else available_modules[0]
+    module = st.session_state["gtms_active_module"]
+    for domain in visible_domains:
+        with st.expander(
+            f'{icons[domain]} {domain}',
+            expanded=module in navigation[domain],
+        ):
+            for item in navigation[domain]:
+                if item not in allowed_modules:
+                    continue
+                active = item == module
+                if st.button(
+                    f'{"▏ " if active else ""}{item}',
+                    key=f"gtms_tree_{domain}_{item}",
+                    use_container_width=True,
+                    type="primary" if active else "secondary",
+                ):
+                    st.session_state["gtms_active_module"] = item
+                    st.rerun()
+    page_aliases = {
+        "货柜详细信息查询": "货柜详情",
+        "用户管理": "用户管理",
+        "拖车行主数据管理": "港前港后拖车供应商管理",
+        "港后LFD智能预警管理": "🧠 智能运营中心｜LFD预警与催办",
+        "港后供应商产能与计划管理": "🧠 智能运营中心｜供应商绩效与产能",
+        "港后供应商绩效KPI管理": "港后供应商KPI考核",
+        "拖车行异常费用管理": "🧠 智能运营中心｜AI异常费用审核",
+        "系统数据备份": "数据库备份中心",
+        "业务数据导入管理": "数据管理",
+        "数据库连接状态管理": "数据库连接状态",
+    }
+    page = page_aliases.get(module, module)
+    if module == "港后运营工作台":
+        # Preserve all existing reporting functions inside the operations workbench.
+        workbench_views = {
+            "运营总览": "运营总览",
+            "全球港后运营总览": "全球港后运营总览",
+            "全美港后供应商总览": "全美港后供应商总览",
+            "货柜查询": "货柜查询",
+            "货柜详情": "货柜详情",
+            "LFD预警": "LFD预警",
+            "拖车商分析": "拖车商分析",
+            "港后供应商KPI考核": "港后供应商KPI考核",
+        }
+        view = st.selectbox("工作台视图", list(workbench_views), key="gtms_workbench_view")
+        page = workbench_views[view]
+    st.divider()
+    if st.button("↪ 退出登录", key="logout_user", use_container_width=True):
         st.session_state.pop("auth_username", None)
+        st.session_state.pop("gtms_active_module", None)
         st.session_state.pop("sqlite_backup_zip", None)
         st.session_state.pop("sqlite_backup_filename", None)
         st.rerun()
-    st.caption("统计业务主键：排柜单号；供应商仅使用港后拖车行。")
+
+# Pages without a migrated backend are visible as planned modules, not fake data forms.
+planned_modules = {
+
+    "账期与费用结算管理": "待建设对账、账期和结算管理。",
+}
+if module not in allowed_modules:
+    st.error("当前账号无权访问此模块。")
+    st.stop()
+
+if page == "全球国家与业务区域管理":
+    show_country_regions(user, DB)
+    st.stop()
+
+if page == "全球港口与码头管理":
+    show_global_ports_terminals(user, DB)
+    st.stop()
+
+if page == "拖车行主数据管理":
+    show_drayage_master(user, DB)
+    st.stop()
+
+if page == "海外仓主数据管理":
+    show_warehouses(user, DB)
+    st.stop()
+
+if page == "清关行管理":
+    show_customs_brokers(user, DB)
+    st.stop()
+
+if page == "船司管理":
+    show_shipping_lines(user, DB)
+    st.stop()
+
+if page == "角色管理":
+    manage_roles(user)
+    st.stop()
+
+if page == "物流AI助理":
+    show_logistics_ai(user, DB)
+    st.stop()
+
+if page == "拖车行合同管理":
+    show_contract_rates(user, DB)
+    st.stop()
+
+if page in planned_modules:
+    st.title(page)
+    st.info(planned_modules[page])
+    st.caption("当前为菜单占位页面，尚未接入数据库或启用编辑操作。")
+    st.stop()
+
+if page == "港前港后拖车供应商管理":
+    show_drayage_suppliers(user)
+    st.stop()
 
 if page == "数据库连接状态":
     show_database_status(user, DB)
@@ -109,7 +235,7 @@ if page == "我的账号":
 
 # Allow first-time cloud imports before attempting to read the database.
 if page == "业务主键质量检查":
-    if user["role"] != "系统管理员":
+    if not is_admin(user):
         st.error("仅管理员可查看数据质量检查。")
         st.stop()
     if not is_neon() and not os.path.exists(DB):
@@ -143,11 +269,11 @@ if page == "业务主键质量检查":
     st.stop()
 
 if page == "数据管理":
-    if user["role"] != "系统管理员":
+    if not is_admin(user):
         st.error("权限不足：仅管理员可访问数据管理及上传业务数据。")
         st.stop()
     st.subheader("业务数据管理")
-    st.caption("Neon 模式下上传将更新云端 PostgreSQL；SQLite 模式下仍使用实例本地文件。")
+    st.warning("当前使用 SQLite：Streamlit Cloud 实例本地文件不保证持久保存，重启或重新部署后可能丢失。请定期从「系统数据备份」下载备份。")
     if not is_neon() and not os.path.exists(DB):
         st.info("尚未导入业务数据。请先上传源文件。")
     else:
@@ -171,7 +297,7 @@ if page == "数据管理":
     st.stop()
 
 if not is_neon() and not os.path.exists(DB):
-    st.warning("云端尚无业务数据库。请联系管理员在「数据管理」上传全球完整源文件。")
+    st.warning("当前 SQLite 尚无业务数据库。请管理员进入「业务数据导入管理」上传原始业务数据。")
     st.stop()
 
 df = read_db("neon" if is_neon() else os.path.getmtime(DB))
@@ -193,13 +319,17 @@ if "目的港预计卸柜时间" not in df.columns:
     st.warning("当前数据库尚未保存目的港预计卸柜时间，请重新导入完整源表以启用 ETA 缺失补充。")
     df["目的港预计卸柜时间"] = ""
 if "ETA（计算）" not in df and "ETA(计算)" not in df:
-    st.warning("数据库尚未保存ETA（计算），请重新上传全量源表启用第三级日期兜底。")
-df["统计日期_dt"] = df["ETA日期_dt"].fillna(pd.to_datetime(df["目的港预计卸柜时间"], errors="coerce", format="mixed")).fillna(pd.to_datetime(df.get("ETA（计算）", pd.Series("", index=df.index)), errors="coerce", format="mixed")).fillna(pd.to_datetime(df.get("ETA(计算)", pd.Series("", index=df.index)), errors="coerce", format="mixed"))
-# Shared operational filters synchronized from VevorGTMS.
+    st.warning("数据库尚未保存ETA（计算），请重新上传完整源表启用第三级日期兜底。")
+df["统计日期_dt"] = df["ETA日期_dt"].fillna(pd.to_datetime(df["目的港预计卸柜时间"], errors="coerce", format="mixed")).fillna(pd.to_datetime(df.get("ETA（计算）", df.get("ETA(计算)", pd.Series("", index=df.index))), errors="coerce", format="mixed"))
+# Shared sidebar filters for operational reports. Always use post-port supplier field.
+# The date range is inclusive; missing/invalid ETA is excluded only when a range is enabled.
 with st.sidebar:
-    st.markdown("### 运营数据筛选")
+    st.markdown('<div class="gtms-filter-title">运营数据筛选</div>', unsafe_allow_html=True)
+    # Keep a global option, but default to all US destinations.
     us_mask = df["目的仓国家"].map(is_us_country)
     country_names = df["目的仓国家"].fillna("").astype(str).str.strip()
+    global_regions = sorted(set(df["区域"].dropna().tolist()))
+    # Non-US areas retain their country so different countries are not conflated.
     df["运营区域选项"] = df["区域"]
     non_us = ~us_mask
     df.loc[non_us, "运营区域选项"] = (
@@ -232,6 +362,7 @@ with st.sidebar:
         end_default = today_filter + timedelta(days=14)
         eta_range = st.date_input("ETA范围（含起止日）", value=(start_default, end_default),
                                   key="gtms_filter_eta_range")
+# Apply geographic scope first, then supplier and inclusive ETA.
 df = scope.copy()
 if selected_supplier not in ("美国所有拖车商", "全部拖车商"):
     df = df[df["港后拖车行"].fillna("").astype(str).str.strip().eq(selected_supplier)].copy()
@@ -240,19 +371,25 @@ if page == "港口与铁路到站动态监控中心":
     st.stop()
 if eta_enabled:
     if eta_range is not None and len(eta_range) == 2:
-        df = df[df["统计日期_dt"].dt.date.between(eta_range[0], eta_range[1])].copy()
+        start_eta, end_eta = eta_range
+        df = df[df["统计日期_dt"].dt.date.between(start_eta, end_eta)].copy()
     else:
         st.info("请选择完整的 ETA 起止日期。")
         st.stop()
-st.caption("统计日期：ETA日期 → 目的港预计卸柜时间 → ETA（计算）；已到港/站以目的港/站卸柜日期为准。")
-st.caption(f"当前运营筛选：{selected_region} · {selected_supplier} · "
-           + (f"ETA {eta_range[0]} 至 {eta_range[1]}" if eta_enabled and eta_range and len(eta_range)==2 else "ETA不限")
-           + f" · {len(df):,} 条业务记录")
+st.caption(f"当前记录：{len(df):,} 柜")
+
+if page == "港后拖车商DO分配":
+    show_do_assignment(user, DB, df)
+    st.stop()
+
 if page == "全球港后运营总览":
     show_global_overview(df)
     st.stop()
-# Legacy US-specific reports remain US-only, even with global sidebar selection.
+
+# Existing US operations pages must not include newly imported non-US records.
 df = df[df["目的仓国家"].map(is_us_country)].copy()
+
+# Report on US post-port records with the explicit sidebar filters applied.
 q = df.copy()
 
 today = pd.Timestamp(date.today())
@@ -265,7 +402,13 @@ q.loc[lfd.notna() & pickup.notna() & (pickup.dt.normalize() > lfd.dt.normalize()
 q.loc[lfd.notna() & pickup.notna() & (pickup.dt.normalize() <= lfd.dt.normalize()), "风险"] = "已按LFD提箱"
 q["柜号显示"] = q["箱号"].replace("", pd.NA).fillna(q["排柜单号"])
 
-if page == "港后供应商KPI考核":
+if page == "🧠 智能运营中心｜LFD预警与催办":
+    show_intelligent_lfd(df)
+elif page == "🧠 智能运营中心｜AI异常费用审核":
+    show_ai_fee_review(df)
+elif page == "🧠 智能运营中心｜供应商绩效与产能":
+    show_supplier_capacity(df)
+elif page == "港后供应商KPI考核":
     show_monthly_supplier_entry(df, user)
 elif page == "全美港后供应商总览":
     show_supplier_overview(df, grid)
@@ -277,26 +420,15 @@ elif page == "运营总览":
         with tab:
             z = q if name is None else q[q["区域"] == name]
             st.subheader(name or "美国港后运营总览")
-            if eta_enabled and eta_range is not None and len(eta_range) == 2:
-                st.markdown(
-                    f'<div style="display:inline-flex;align-items:center;gap:9px;'
-                    f'background:#e8f2ff;border:1px solid #bdd5fa;border-left:4px solid #ff5a19;'
-                    f'border-radius:8px;padding:7px 13px;margin:0 0 12px 0;'
-                    f'color:#09275d;font-weight:700;font-size:.91rem">'
-                    f'📅 ETA 统计窗口：{eta_range[0]:%Y/%m/%d} — {eta_range[1]:%Y/%m/%d}'
-                    f' <span style="font-weight:400;color:#4b6a9b">｜ETA日期 → 目的港预计卸柜时间 → ETA（计算） · 随左侧筛选同步更新</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.caption("ETA 统计窗口：请选择完整的开始和结束日期")
-            arrived = pd.to_datetime(z["目的港/站卸柜日期"], errors="coerce", format="mixed").notna()
+            arrived = z["ATA日期_dt"].dt.normalize().le(today)
+            discharged = pd.to_datetime(z["目的港/站卸柜日期"], errors="coerce", format="mixed").dt.normalize().le(today)
             picked = z["进口实际提箱时间_dt"].notna()
             delivered = z["实际送仓时间_dt"].notna()
             returned = z["实际还柜日期_dt"].notna()
             metric_masks = [
                 ("货柜记录", pd.Series(True, index=z.index)),
                 ("已到港/站", arrived),
+                ("已卸柜", discharged),
                 ("LFD已过待核实", z["风险"].eq("LFD已过/提箱待核实")),
                 ("已提柜", picked),
                 ("已送仓", delivered),
@@ -305,13 +437,12 @@ elif page == "运营总览":
                 ("到港/站未记录提柜", arrived & ~picked),
             ]
             selected_metric_key = f"overview_selected_metric_{i}"
-            for metric_idx, (col, (label, mask)) in enumerate(zip(st.columns(8), metric_masks)):
+            for metric_idx, (col, (label, mask)) in enumerate(zip(st.columns(len(metric_masks)), metric_masks)):
                 count = int(mask.sum())
                 with col:
-                    st.caption(label)
-                    if st.button(f"{count:,}", key=f"overview_metric_{i}_{metric_idx}",
+                    if st.button(f"{label}\n\n**{count:,}**", key=f"overview_metric_{i}_{metric_idx}",
                                  help=f"点击查看「{label}」的 {count:,} 条货柜记录",
-                                 disabled=count == 0):
+                                 disabled=count == 0, use_container_width=True):
                         st.session_state[selected_metric_key] = (
                             None if st.session_state.get(selected_metric_key) == metric_idx else metric_idx
                         )
@@ -330,8 +461,7 @@ elif page == "运营总览":
 
             st.markdown("### 🚨 区域港后供应商 LFD 预警统计")
             with st.container(border=True):
-                st.caption("按当前区域及 ETA 范围统计；仅使用「港后拖车行」字段。"
-                           "预警分为已过待核实、三天内到期、提箱晚于LFD；缺少提箱记录不等于确认未提箱。")
+                st.caption("缺少提箱记录不等于确认未提箱。")
                 alert_data = z.copy()
                 alert_data["港后供应商"] = alert_data["港后拖车行"].fillna("").astype(str).str.strip()
                 alert_data.loc[alert_data["港后供应商"].isin(
@@ -356,18 +486,19 @@ elif page == "运营总览":
                     ).round(1)
                     vendor_alerts = vendor_alerts.sort_values(
                         ["预警合计", "区域内供应商总柜量"], ascending=False).reset_index()
-                    st.dataframe(vendor_alerts, hide_index=True, use_container_width=True)
-                    st.download_button("导出该区域供应商LFD预警汇总 CSV",
+                    table_col, chart_col = st.columns([3,2])
+                    table_col.dataframe(vendor_alerts, hide_index=True, use_container_width=True, height=min(340, 38+35*len(vendor_alerts)))
+                    table_col.download_button("导出该区域供应商LFD预警汇总 CSV",
                         vendor_alerts.to_csv(index=False).encode("utf-8-sig"),
                         file_name=f"港后供应商LFD预警_{i}.csv", mime="text/csv",
                         key=f"overview_vendor_lfd_export_{i}")
                     warning_rows = alert_data[alert_data["是否LFD预警"]]
                     if not warning_rows.empty:
-                        st.markdown("##### 各供应商 LFD 预警柜量")
+                        chart_col.markdown("##### 各供应商 LFD 预警柜量")
                         plot = vendor_alerts.set_index("港后供应商")[
                             ["LFD已过待核实", "LFD三天内", "提箱晚于LFD"]]
-                        st.bar_chart(plot, horizontal=True,
-                                     height=max(260, min(650, len(plot) * 32)))
+                        chart_col.bar_chart(plot, horizontal=True, color=["#ba3c43","#d99b31","#547ca5"],
+                                     height=max(190, min(320, len(plot) * 28)))
                         with st.expander("🔎 按供应商查看 LFD 预警货柜明细", expanded=False):
                             suppliers = vendor_alerts.loc[
                                 vendor_alerts["预警合计"] > 0, "港后供应商"].tolist()
@@ -383,25 +514,21 @@ elif page == "运营总览":
                             details = details.sort_values("LFD_dt", na_position="last")
                             st.caption(f"符合条件 {len(details):,} 柜")
                             grid(details, key=f"overview_vendor_lfd_detail_{i}")
-                    if selected_supplier not in ("美国所有拖车商", "全部拖车商"):
-                        st.caption("左侧已筛选单个港后拖车商；切换为「全部」可比较该区域所有供应商。")
 
             st.markdown("### 📊 区域业务与拖车商分配")
             chart_left, chart_right = st.columns([1, 1], gap="large")
             with chart_left:
                 with st.container(border=True):
                     st.markdown("#### 各区域总业务柜量")
-                    st.caption("单位：柜 · 当前筛选范围")
                     volume = z["区域"].value_counts().sort_values(ascending=True)
                     if volume.empty:
                         st.info("当前范围内暂无货柜记录")
                     else:
-                        st.bar_chart(volume, horizontal=True, height=350,
+                        st.bar_chart(volume, horizontal=True, height=240,
                                      x_label="柜量", y_label="运营区域")
             with chart_right:
                 with st.container(border=True):
                     st.markdown("#### 各区域港后拖车商占比")
-                    st.caption("100% 堆叠 · 按港后拖车行统计（含未分配）")
                     share_data = z[["区域", "港后拖车行"]].copy()
                     share_data["港后拖车行"] = share_data["港后拖车行"].fillna("").astype(str).str.strip()
                     share_data.loc[share_data["港后拖车行"].eq(""), "港后拖车行"] = "未分配/未记录"
@@ -435,7 +562,7 @@ elif page == "运营总览":
                         }
                         st.vega_lite_chart({
                             "data": {"values": chart_rows.to_dict("records")},
-                            "height": 290,
+                            "height": 220,
                             "layer": [
                                 {"mark": {"type": "bar", "cornerRadiusEnd": 2},
                                  "encoding": base_encoding},
@@ -453,10 +580,8 @@ elif page == "运营总览":
                             "view": {"stroke": None},
                         }, use_container_width=True, key=f"overview_supplier_share_{i}")
                         st.caption("色块显示柜量与占比；占比不足13%的色块请悬停查看，避免标签重叠。")
-                        if selected_supplier not in ("美国所有拖车商", "全部拖车商"):
-                            st.caption("当前已筛选单个拖车商；选择左侧「全部」查看完整供应商占比。")
             if not z.empty:
-                with st.expander("🔎 区域柜量及港后拖车商占比 · 条件查询", expanded=True):
+                with st.expander("🔎 区域柜量及港后拖车商占比 · 条件查询", expanded=False):
                     st.caption("在当前 ETA、区域和拖车商全局筛选范围内进一步查询；占比以所选区域的全部货柜为分母。")
                     query_data = z[["区域", "港后拖车行"]].copy()
                     query_data["港后拖车商"] = query_data["港后拖车行"].fillna("").astype(str).str.strip()
@@ -523,15 +648,15 @@ elif page == "运营总览":
                         candidate = ships[terminal_col].astype("string").str.strip().replace("", pd.NA)
                         ships["停靠码头"] = ships["停靠码头"].fillna(candidate)
                 ships["停靠码头"] = ships["停靠码头"].fillna("未记录")
-                ships["预计到港 ETA"] = ships["ETA日期_dt"].dt.strftime("%Y-%m-%d").fillna("未记录")
-                ships["实际到港 ATA"] = ships["ATA日期_dt"].dt.strftime("%Y-%m-%d").fillna("未记录")
+                ships["预计到港 ETA"] = pd.to_datetime(ships.get("卸货港ETA日期", pd.Series("", index=ships.index)), errors="coerce", format="mixed").dt.strftime("%Y-%m-%d").fillna("未记录")
+                ships["实际到港 ATA"] = pd.to_datetime(ships.get("卸货港ATA日期", pd.Series("", index=ships.index)), errors="coerce", format="mixed").dt.strftime("%Y-%m-%d").fillna("未记录")
                 discharge_dt = pd.to_datetime(
                     ships["目的港/站卸柜日期"], errors="coerce", format="mixed")
-                ships["卸柜日期"] = discharge_dt.dt.strftime("%Y-%m-%d").fillna("未记录")
+                ships["最终卸柜日期"] = discharge_dt.dt.strftime("%Y-%m-%d").fillna("未记录")
                 ships["船公司"] = ships["船公司"].fillna("").astype(str).str.strip().replace("", "未记录")
                 summary = (
                     ships.groupby(["船公司", "船舶/航次", "卸货港", "停靠码头",
-                                   "预计到港 ETA", "实际到港 ATA", "卸柜日期"],
+                                   "预计到港 ETA", "实际到港 ATA", "最终卸柜日期"],
                                   dropna=False)
                     .size().reset_index(name="柜量"))
                 summary["_sort_eta"] = pd.to_datetime(summary["预计到港 ETA"], errors="coerce")

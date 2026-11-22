@@ -100,7 +100,7 @@ def show_monthly_supplier_entry(df, user):
     except Exception as exc:
         st.error(f"无法读取数据库：{exc}")
         return
-    if user.get("role") == "系统管理员":
+    if user.get("role") == "管理员":
         with st.expander("统一导入 KPI 文件", expanded=batches.empty):
             uploaded = st.file_uploader("上传完整 KPI 工作簿", type=["xlsx"], key="kpi_global_upload")
             choices = [f"{y}-{m:02d}" for y in range(2024, 2036) for m in range(1,13)]

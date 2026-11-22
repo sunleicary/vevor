@@ -25,7 +25,7 @@ DATABASES = (
 
 
 def show_database_backup(user):
-    if not user or user.get("role") != "系统管理员":
+    if not user or user.get("role") != "管理员":
         st.error("权限不足：仅管理员可备份数据库。")
         st.stop()
 
