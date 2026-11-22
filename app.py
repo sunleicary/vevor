@@ -191,7 +191,9 @@ for col in ["ETA日期", "ATA日期", "LFD", "进口实际提箱时间", "实际
 if "目的港预计卸柜时间" not in df.columns:
     st.warning("当前数据库尚未保存目的港预计卸柜时间，请重新导入完整源表以启用 ETA 缺失补充。")
     df["目的港预计卸柜时间"] = ""
-df["统计日期_dt"] = df["ETA日期_dt"].fillna(pd.to_datetime(df["目的港预计卸柜时间"], errors="coerce", format="mixed"))
+if "ETA（计算）" not in df and "ETA(计算)" not in df:
+    st.warning("数据库尚未保存ETA（计算），请重新上传全量源表启用第三级日期兜底。")
+df["统计日期_dt"] = df["ETA日期_dt"].fillna(pd.to_datetime(df["目的港预计卸柜时间"], errors="coerce", format="mixed")).fillna(pd.to_datetime(df.get("ETA（计算）", pd.Series("", index=df.index)), errors="coerce", format="mixed")).fillna(pd.to_datetime(df.get("ETA(计算)", pd.Series("", index=df.index)), errors="coerce", format="mixed"))
 # Shared operational filters synchronized from VevorGTMS.
 with st.sidebar:
     st.markdown("### 运营数据筛选")
@@ -238,7 +240,7 @@ if eta_enabled:
     else:
         st.info("请选择完整的 ETA 起止日期。")
         st.stop()
-st.caption("统计日期：ETA优先，缺失取目的港预计卸柜时间；已到港/站以目的港/站卸柜日期为准。")
+st.caption("统计日期：ETA日期 → 目的港预计卸柜时间 → ETA（计算）；已到港/站以目的港/站卸柜日期为准。")
 st.caption(f"当前运营筛选：{selected_region} · {selected_supplier} · "
            + (f"ETA {eta_range[0]} 至 {eta_range[1]}" if eta_enabled and eta_range and len(eta_range)==2 else "ETA不限")
            + f" · {len(df):,} 条业务记录")
@@ -278,7 +280,7 @@ elif page == "运营总览":
                     f'border-radius:8px;padding:7px 13px;margin:0 0 12px 0;'
                     f'color:#09275d;font-weight:700;font-size:.91rem">'
                     f'📅 ETA 统计窗口：{eta_range[0]:%Y/%m/%d} — {eta_range[1]:%Y/%m/%d}'
-                    f' <span style="font-weight:400;color:#4b6a9b">｜ETA优先，缺失取预计卸柜时间 · 随左侧筛选同步更新</span>'
+                    f' <span style="font-weight:400;color:#4b6a9b">｜ETA日期 → 目的港预计卸柜时间 → ETA（计算） · 随左侧筛选同步更新</span>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
